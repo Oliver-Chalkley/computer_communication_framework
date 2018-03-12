@@ -143,7 +143,7 @@ class Pbs(Connection):
         with open(output_filename, mode='wt', encoding='utf-8') as myfile:
             myfile.write("#!/bin/bash" + "\n")
             myfile.write("\n")
-            myfile.write("# This script was created using Oliver Chalkley's remote-computer-manager library - https://github.com/OliCUoB/remote-computer-manager." + "\n")
+            myfile.write("# This script was created using Oliver Chalkley's remote-computer-framework library - https://github.com/OliCUoB/remote-computer-framework." + "\n")
             myfile.write("# " + initial_message_in_code + "\n")
             myfile.write("# Title: " + pbs_job_name + "\n")
             myfile.write("# User: " + self.forename_of_user + ", " + self.surename_of_user + ", " + self.user_email + "\n")
