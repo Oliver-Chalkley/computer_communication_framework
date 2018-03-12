@@ -49,6 +49,7 @@ class Connection(metaclass=ABCMeta):
     @abstractmethod
     def createStandardSubmissionScript(self):
         # If the remote computer is a cluster then you may need to submit jobs through a queuing system. This will act as a template for a standard job submission script but with no actual code to execute. The code to execute will be passed to the function as a list so that the child class doesn't have to keep being re-written everytime a new type of job is performed on the cluster.
+        pass
 
     @abstractmethod
     def checkQueue(self):
