@@ -1,7 +1,5 @@
 from abc import ABCMeta, abstractmethod
 import subprocess
-import sys
-import os
 import time
 class Connection(metaclass=ABCMeta):
     """
