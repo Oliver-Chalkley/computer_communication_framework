@@ -135,7 +135,7 @@ class RemoteBaseConnectionTest(unittest.TestCase):
         cls.ssh_config_alias = ssh_config_alias
         ssh_user_name = input('Please enter the user name on the remote computer: ')
         cls.ssh_user_name = ssh_user_name
-        cls.faux_connection = FakeBaseConnection(cls.ssh_config_alias, cls.ssh_user_name)
+        cls.faux_connection = FakeBaseConnection(cls.ssh_config_alias, cls.ssh_user_name, 'test_forename', 'test_surname', 'test_email', 'test_affiliation')
 
         # check that the base connection test directoy doesn't already exist
         if os.path.isdir(cls.base_dir):
@@ -187,11 +187,37 @@ class RemoteBaseConnectionTest(unittest.TestCase):
 
     # BASE PBS CLASS
 
-    def test_checkQueue(self):
-        output_dict = base_connection.BasePbs.checkQueue(self.faux_connection, ' 13 ')
-        self.assertTrue(( output_dict['return_code'] == 0 and type(output_dict['stdout']) is str and output_dict['stderr'] is str and not output_dict['stderr'] ))
+    # Cannot test checkQueue without creating an instance of the class so will have to wait for test on children
+    # Cannot test createStandardSubmissionScript without creating an instance of the class so will have to wait for test on children.
 
-# NON-ABSTRACT CLASSES
+    def test_createPbsSubmissionScriptTemplate(self):
+        sub_template_dict = {}
+        sub_template_dict['pbs_job_name'] = 'unit test'
+        sub_template_dict['no_of_nodes'] = 1
+        sub_template_dict['no_of_cores'] = 3
+        sub_template_dict['walltime'] = '30:00:00'
+        sub_template_dict['queue_name'] = 'short'
+        sub_template_dict['job_number'] = 13
+        sub_template_dict['outfile_name_and_path'] = '/out/path/test.out'
+        sub_template_dict['errorfile_name_and_path'] = '/error/path/test.err'
+        sub_template_dict['initial_message_in_code'] = 'Initial code test.'
+        sub_template_dict['array_nos'] = '1-200'
+
+        pbs_template_as_a_list = base_connection.BasePbs.createPbsSubmissionScriptTemplate(self.faux_connection, sub_template_dict['pbs_job_name'], sub_template_dict['no_of_nodes'], sub_template_dict['no_of_cores'], sub_template_dict['array_nos'], sub_template_dict['walltime'], sub_template_dict['queue_name'], sub_template_dict['job_number'], sub_template_dict['outfile_name_and_path'], sub_template_dict['errorfile_name_and_path'], sub_template_dict['initial_message_in_code'])
+
+        string_test = [0 if type(line) is str else 1 for line in pbs_template_as_a_list]
+        
+        self.assertTrue((type(pbs_template_as_a_list) is list and sum(string_test) == 0))
+
+        return
+
+    def test_getJobIdFromSubStdOut(self):
+        stdout = '  vfdnjkf vfdsbjkl 359 gydso  '
+        output = base_connection.BasePbs.getJobIdFromSubStdOut(self.faux_connection, stdout)
+        print('output = ', output)
+        self.assertTrue(output == 359)
+
+        return
 
 # ADDITIONAL CLASSES
 class FakeBaseConnection():
@@ -200,9 +226,14 @@ class FakeBaseConnection():
 
     Because this will test remote connections it means that you need a computer that you have SSH access to and set up an .ssh/config alias so that you can log into the other computer using only the alias and no passwords. There should be information about this at the beginning of the documentation or in about the library on PIP.
     """
-    def __init__(self, ssh_config_alias, user_name):
+    def __init__(self, ssh_config_alias, user_name, forename, surname, email, affiliation):
         self.ssh_config_alias = ssh_config_alias
         self.user_name = user_name
+        self.forename_of_user = forename
+        self.surname_of_user = surname
+        self.user_email = email
+        self.affiliation = affiliation
+
 
 if __name__ == '__main__':
     unittest.main()

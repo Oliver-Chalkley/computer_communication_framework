@@ -7,7 +7,7 @@ class MGA(metaclass=ABCMeta):
     
     This class will assume that all connections are child classes of the base_connection.Connection class and all job submissions and job submission management classes are children of the relavent base_cluster_submissions class.
     """
-    def __init__(self, dict_of_cluster_instances, MGA_name, relative2clusterBasePath_simulation_output_path, repetitions_of_a_unique_simulation):
+    def __init__(self, dict_of_cluster_instances, MGA_name, relative2clusterBasePath_simulation_output_path, repetitions_of_a_unique_simulation, checkStopFunction, getNewGenerationFunction):
         """
         This creates a basis for a multi-generation algorithm class.
 
@@ -22,19 +22,19 @@ class MGA(metaclass=ABCMeta):
         self.MGA_name = MGA_name
         self.relative2clusterBasePath_simulation_output_path = relative2clusterBasePath_simulation_output_path
         self.reps_of_unique_sim = repetitions_of_a_unique_simulation
+        self.checkStopFunction = checkStopFunction
+        self.getNewGenerationFunction = getNewGenerationFunction
 
     # instance methods
     def run(self):
         if self.generation_counter == None:
             self.generation_counter = 0
-        while self.checkStop() != True:
+        while self.checkStopFunction() != True:
             self.run_sim_out = self.runSimulations() 
             self.generation_counter += 1
             print('Next generation is ', self.generation_counter)
 
-    def runSimulations(self):
-        # get the new children
-        child_name_to_set_dict = self.getNewGeneration()
+    def spreadChildrenAcrossClusters(self, child_name_to_set_dict):
         child_names_list = list(child_name_to_set_dict.keys())
         no_of_children = len(child_names_list)
         # split them across clusters
@@ -54,133 +54,248 @@ class MGA(metaclass=ABCMeta):
 
             child_name_to_set_dict_per_cluster[cluster] = {child_names_list[idx]: child_name_to_set_dict[child_names_list[idx]] for idx in range(previous_idx, last_name_idx)}
             previous_idx = last_name_idx
+
+        return child_name_to_set_dict_per_cluster
+
+    def spreadChildrenAcrossJobs(self, child_name_to_set_dict_per_cluster, max_children_per_job):
+        child_name_to_set_dict_per_job_per_cluster = {}
+        for cluster in child_name_to_set_dict_per_cluster.keys():
+            if len(child_name_to_set_dict_per_cluster[cluster]) <= max_children_per_job:
+                child_name_to_set_dict_per_job_per_cluster[cluster] = [child_name_to_set_dict_per_cluster[cluster]]
+            else:
+                list_of_children_names = list(child_name_to_set_dict_per_cluster[cluster].keys())
+                # create a list of lists where each inner-list is a set of max_children_per_job children names - excpet the last one which could be a remainder
+                children_names_split = [list_of_children_names[i:i + max_children_per_job] for i in range(0, len(list_of_children_names), max_children_per_job)]
+                # This is a dictionary comprehension inside a list comprehension. The list comprehension loops through each inner-list from list_of_children_names and presents it to the dictionary comprehension. The dictionary comprehension then loops through each of the elements inside inner-list and creates a dictionary of children names to sets. This results in a list of dictionaries.
+                child_name_to_set_dict_per_job_per_cluster[cluster] = [{child_name: child_name_to_set_dict_per_cluster[cluster][child_name] for child_name in child_name_set} for child_name_set in children_names_split]
+
+        return child_name_to_set_dict_per_job_per_cluster
+
+    def runSimulations(self):
+        # get the new children
+        # The child name (i.e. key) will be the name used to describe the individual child. The value must contaiin all the arguements neccessary to create a job on the cluster to simulate (or whatever else it might be) the child.
+        child_name_to_set_dict = self.getNewGenerationFunction()
         
+        # spread the children across clusters
+        child_name_to_set_dict_per_cluster = self.spreadChildrenAcrossClusters(child_name_to_set_dict)
+
+        # spread children-by-cluster across jobs
+        child_name_to_set_dict_per_cluster = self.spreadChildrenAcrossJobs(child_name_to_set_dict_per_cluster, self.max_children_per_job)
+
         # submit generation to the cluster
         dict_of_job_submission_insts = {}
         dict_of_job_management_insts = {}
+        list_of_cluster_instance_keys = list(self.cluster_instances_dict.keys()) 
         # create submission instances
         for cluster_connection in list_of_cluster_instance_keys:
-            dict_of_job_submission_insts[cluster_connection] = self.createJobSubmissionInstance()
+            if type(child_name_to_set_dict_per_cluster[cluster_connection]) is not list:
+                raise TypeError('child_name_to_set_dict_per_cluster[cluster_connection] must be a list! This is because there can potentially be more than one dictionary of jobs passed to one cluster and so (even if there is only one ditionary) the dictionaries must be in a list. Here type(child_name_to_set_dict_per_cluster[cluster_connection]) = ', type(child_name_to_set_dict_per_cluster[cluster_connection]))
+
+            inner_loop_counter = 1
+            for single_child_name_to_set_dict in child_name_to_set_dict_per_cluster[cluster_connection]:
+                dict_of_job_submission_insts[cluster_connection + '_' + inner_loop_counter] = self.createJobSubmissionInstance(self.cluster_instances_dict[cluster_connection], single_child_name_to_set_dict)
+                inner_loop_counter += 1
 
         # send all jobs to clusters 
         list_of_dict_of_job_management_instances = self.submitAndMonitorJobsOnCluster(dict_of_job_submission_insts)
 
         # convert list into the dict that the rest of the library is expecting
         dict_of_job_management_insts = {list_of_cluster_instance_keys[idx]: list_of_dict_of_job_management_instances[idx] for idx in range(len(list_of_dict_of_job_management_instances))}
-        # update the fittest population
+
+        # Perform all tasks neccessary after a generation of simulations has finished
         for cluster_connection in list_of_cluster_instance_keys:
-            self.updateFittestPopulation(dict_of_job_submission_insts[cluster_connection], dict_of_job_management_insts[cluster_connection])
+            self.postSimulationFunction(dict_of_job_submission_insts[cluster_connection], dict_of_job_management_insts[cluster_connection])
 
         return
 
     # ABSTRACT METHODS
+    @abstractmethod
+    def postSimulationFunction(self, dict_of_job_submission_insts[cluster_connection], dict_of_job_management_insts[cluster_connection])
+        pass
+
     @abstractmethod
     def submitAndMonitorJobsOnCluster(self, dict_of_job_submission_insts):
         # The job submission instance is an object that inherits from the base_cluster_submissions.BaseJobSubmission class. This takes a dictionary of job submission instance as an argument and then uses their methods to prepare and submit the jobs. From there this function can monitor the progress of the submission and do any other related work like process data and update databases etc. What needs to be done in this function needs to be defined at a higher level so this is left as an abstract method here.
         pass
 
     @abstractmethod
-    def createJobSubmissionInstance(self):
+    def createJobSubmissionInstance(self, cluster_connection, child_name_to_set_dict_per_cluster[cluster_connection]):
         # The job submission instance is an object that inherits from the base_cluster_submissions.BaseJobSubmission class. This is left as an abstract method so that higher level programs can choose what kind of job submissions they want to create.
         pass
 
-    @abstractmethod
+class GeneticAlgorithmBase(MGA):
+    def __init__(self, dict_of_cluster_instances, MGA_name, relative2clusterBasePath_simulation_output_path, repetitions_of_a_unique_simulation, checkStopFunction, getNewGenerationFunction):
+        MGA.__init__(self, dict_of_cluster_instances, MGA_name, relative2clusterBasePath_simulation_output_path, repetitions_of_a_unique_simulation, jobSubmissionClass, submissionManagementClass, checkStopFunction, getNewGenerationFunction)
+
+    ### FUNCTIONS THAT GET A NEW GENERATION
+
     def getNewGeneration(self):
-        pass
+        try:
+            len(self.fittest_individuals)
+            has_length = True
+        except:
+            has_length = False
 
-    @abstractmethod
-    def getPopulationSize(self):
-        pass
+        if has_length == True:
+            if self.generation_counter == 0:
+                print("generation 0!")
+                ko_name_to_set_dict = self.getRandomKos()
+            elif len(self.fittest_individuals) == 0:
+                print("No survivors!")
+                ko_name_to_set_dict = self.getRandomKos()
+	    elif len(self.fittest_individuals) < self.min_population_to_start_mating:
+		print("Not enough survivors to start mating!")
+		# NEED TO FIGURE THIS OUT!!! change the generation size to the same as generation 0 since we haven't got to matting mode yet
+		#self.generation_num_to_gen_size_dict[self.generation_counter] = self.generation_num_to_gen_size_dict[0]
+		ko_name_to_set_dict = self.getRandomKos()
 
-    @abstractmethod
+		list_of_ko_numbers = [int(ko_name[2:]) for ko_name in ko_name_to_set_dict.keys()]
+		for new_ind in range(len(self.fittest_individuals)):
+		    new_ko_name = 'ko' + str(max(list_of_ko_numbers) + new_ind + 1)
+		    ko_name_to_set_dict[new_ko_name] = self.fittest_individuals[new_ind]
+
+            else:
+                print("Normal mating!")
+                ko_name_to_set_dict = self.mateTheFittest()
+        elif has_length == False:
+            print("No length!")
+            ko_name_to_set_dict = self.getRandomKos()
+        else:
+            raise ValueError("self.fittest_individuals must either have length or not have length here self.fittest_individuals = ", self.fittest_individuals)
+
+        return ko_name_to_set_dict
+
+    def updateFittestPopulation(self, submission_instance, submission_management_instance):
+	# create dictionary which will be used to store all viable sims from this generation
+	dict_of_this_gen_viable_sims = {}
+	# extract all the simulations that divided from this generation and record them in a tmp dict
+	tmp_sim_results_dict = {ko: submission_management_instance.simulation_data_dict[ko] for ko in submission_management_instance.simulation_data_dict.keys() if sum([int(submission_management_instance.simulation_data_dict[ko][rep][1]) for rep in range(len(submission_management_instance.simulation_data_dict[ko]))]) != 0}
+	# add all results to dict_of_this_gen_viable_sims
+	for ko in tmp_sim_results_dict.keys():
+	    if ko not in dict_of_this_gen_viable_sims:
+		dict_of_this_gen_viable_sims[ko] = []
+
+	    dict_of_this_gen_viable_sims[ko].append(tmp_sim_results_dict[ko])
+
+	#combine with the current fittest population
+	all_viable_kos = list(dict_of_this_gen_viable_sims.keys())
+	all_viable_kos = all_viable_kos + self.fittest_individuals.copy()
+	# get unique ko sets
+	all_viable_kos = list(set(all_viable_kos))
+	# sort all_viable_ids in order of length so that we can pick the fittest 100
+	# create dict of ko set to length
+	ko_codes_to_len_dict = {ko: len(ko) for ko in all_viable_kos}
+	ko_codes_to_len_list_sorted = sorted(ko_codes_to_len_dict.items(), key=operator.itemgetter(1), reverse=True)
+
+	# create a list of the fittest individuals
+	fittest_individuals = [ko_set[0] for ko_set in ko_codes_to_len_list_sorted]
+	if len(fittest_individuals) > self.max_no_of_fit_individuals:
+		fittest_individuals = fittest_individuals[:(self.max_no_of_fit_individuals)]
+
+	self.fittest_individuals = fittest_individuals.copy()
+
+	return
+
+    ### FUNCTIONS THAT MATE TWO PARENTS
+
+    def sliceMate(self, parent1_genome, parent2_genome):
+        # pick a idx to split the geneomes by
+        split_idx = random.randint(0,len(parent1_genome) - 1)
+
+        child = parent1_genome[:split_idx] + parent2_genome[split_idx:]
+
+        return child
+
+    def mixMate(self, parent1_genome, parent2_genome):
+        # pick a idx to split the geneomes by
+        split_idx = random.randint(0,len(parent1_genome) - 1)
+
+        # randomly create the gene indexs to take from parent1
+        parent1_idxs_to_inherit = random.sample(range(len(parent1_genome)), split_idx)
+        # create tmp child genome from randomly selected choice of genes from both parents
+        child = [parent1_genome[idx] if parent1_idxs_to_inherit.count(idx) > 0 else parent2_genome[idx] for idx in range(len(parent1_genome))]
+
+        return child
+
+    ### FUNCTIONS THAT MUTATE CHILDREN
+
+    def singleMutation(child):
+       # randomly pick index from child to mutate
+       idx = random.randint(0, len(child) - 1)
+       # flip the gene
+       child[idx] = (child[idx] + 1) % 2
+
+       return child
+
+    def exponentialMutation(child):
+        # pick the amount of gene mutations from a exponentially distributed random number with parameter self.exponential_parameter
+        exponential_parameter = self.exponential_parameter
+        # exp R.V. can produce zero, we don't want zeros
+        number_of_gene_mutations = 0
+        while number_of_gene_mutations == 0:
+            number_of_gene_mutations = int(np.around(np.random.exponential(exponential_parameter)))
+
+        # flip number_of_gene_mutations amount of genes randomly
+        # create list of indexs to flip
+        gene_idxs_to_flip = random.sample(range(len(child)), number_of_gene_mutations)
+        # flip genes
+        for idx in gene_idxs_to_flip:
+            child[idx] = (child[idx] + 1) % 2
+
+        return child
+
     def mateTheFittest(self):
-        pass
+	# get the fittest (note this is already in order of largest KO length at the top and smallest at the bottom)
+	fittest = self.fittest_individuals.copy()
+	print("fittest = ", fittest)
+	# randomly pick a ko such that larger KOs are more likely to be picked
+	ko_length_of_fittest = [len(ko) for ko in fittest]
+	list_of_probabilities = [ko_length_of_fittest[idx]/sum(ko_length_of_fittest) for idx in range(len(ko_length_of_fittest))]
+	# create new generation
+	pop_size = self.getPopulationSizeFunction()
+	list_of_children = [float('NaN') for i in range(pop_size)]
+	ko_set_names = [float('NaN') for i in range(pop_size)]
+	for child_idx in range(pop_size):
+	    parent1_codes = np.random.choice(fittest, p=list_of_probabilities)
+	    parent2_codes = parent1_codes
+	    while parent2_codes == parent1_codes:
+		parent2_codes = np.random.choice(fittest, p=list_of_probabilities)
 
-    @abstractmethod
-    def getGenerationName(self):
-        pass
+	# convert parent ko codes to ids
+	parent1_ids = [self.gene_code_to_id_dict[code] for code in parent1_codes]
+	parent2_ids = [self.gene_code_to_id_dict[code] for code in parent2_codes]
+	# convert parent KO sets to genomes
+	parent1_genome = self.wt_genome.copy()
+	parent2_genome = self.wt_genome.copy()
+	for id in parent1_ids:
+	    parent1_genome[self.id_to_genome_idx_dict[id]] = 0
 
-    @abstractmethod
-    def updateFittestPopulation(self):
-        pass
+	for id in parent2_ids:
+	    parent2_genome[self.id_to_genome_idx_dict[id]] = 0
 
-    @abstractmethod
-    def checkStop(self):
-        pass
+	# mate the genomes
+	# create empty child genome
+	tmp_child = []
+	# make sure the child has at least 2 KOs
+	while tmp_child.count(0) < 2:
+            tmp_child = self.createChildFunction(parent1_genome, parent2_genome)
 
-class WholeCellModelBase(MGA):
-    def __init__(self, dict_of_cluster_instances, MGA_name, relative2clusterBasePath_simulation_output_path, reps_of_unique_sim):
-        MGA.__init__(self, dict_of_cluster_instances, MGA_name, relative2clusterBasePath_simulation_output_path, relative2clusterBasePath_simulation_output_path)
+	# mutate genes randomly 10% of the time
+	if random.random() < self.mutation_probability:
 
-    # All methods are static because they are common tools and it is useful to be able to access them wihtout creating an instance.
+            tmp_child = self.mutateChildFunction(tmp_child)
 
-    # STATIC METHODS
-    @staticmethod
-    def random_combination(iterable_of_all_posible_indexs, length_of_combination):
-            "Random selection from itertools.combinations(iterable_of_all_posible_indexs, length_of_combination)"
-            pool = tuple(iterable_of_all_posible_indexs)
-            n = len(pool)
-            indices = sorted(random.sample(range(n), length_of_combination))
+	    # convert back into idxs, ids then codes
+	    tmp_child = [i for i,x in enumerate(tmp_child) if x == 0]
+	    tmp_child = [self.genome_idx_to_id_dict[idx] for idx in tmp_child]
+	    tmp_child.sort()
+	    tmp_child = tuple([self.gene_id_to_code_dict[gene_id] for gene_id in tmp_child])
 
-            return tuple(pool[i] for i in indices)
+	    # update children
+	    list_of_children[child_idx] = tmp_child
+	    # create ko set names
+	    ko_set_names[child_idx] = 'ko' + str(child_idx + 1)
 
-    @staticmethod
-    def random_pick(list_of_options, probabilities):
-        x = random.uniform(0, 1)
-        cumulative_probability = 0.0
-        for idx in range(len(list_of_options)):
-            cumulative_probability += probabilities[idx]
-            if x < cumulative_probability: 
-                break
+	ko_name_to_set_dict = {ko_set_names[idx]: list_of_children[idx] for idx in range(len(list_of_children))}
 
-        return list_of_options[idx]
-
-    @staticmethod
-    def getGeneCodesToIdDict(conn, tuple_of_gene_codes):
-        """Creates a dictionary who's keys are Joshua Rees 358 gene codes and values are the gene ID acording to our database."""
-        gene_code_to_id_dict = conn.db_connection.convertGeneCodeToId(tuple_of_gene_codes)
-
-        return gene_code_to_id_dict
-
-    @staticmethod
-    def invertDictionary(input_dict):
-        """This function takes a dictionary and inverts it (assuming it's one to one)."""
-        inverse_dict = {v: k for k, v in input_dict.items()}
-
-        return inverse_dict
-
-    @staticmethod
-    def createIdxToIdDict(code_to_id_dict):
-        list_of_ids = list(code_to_id_dict.values())
-        # sort them into ascending order (just because the order of dicts aren't alwayys preserved and so provided we are using the same JR genes to start with we can compare the indexs provided they are ordered in ascending order) maybe not neccessary but avoiding hard to find bug later on
-        list_of_ids.sort()
-        idx_to_id_dict = {idx: list_of_ids[idx] for idx in range(len(list_of_ids))}
-
-        return idx_to_id_dict
-
-    @staticmethod
-    def convertIdxToGeneId(gene_indexs_list, index_to_id_dict):
-        """
-        """
-        # test input is of the right form
-        if not (type(gene_indexs_list) is list and type(index_to_id_dict) is dict):
-            raise TypeError('gene_indexs_list must be a list (even if only one value!) and index_to_id_dict must be a dictionary. Here type(gene_indexs_list)=', type(gene_indexs_list), ' and type(index_to_id_dict)=', type(index_to_id_dict))
-
-        gene_id_list = [index_to_id_dict[idx] for idx in gene_indexs_list]
-
-        return gene_id_list
-
-    @staticmethod
-    def convertGeneIdToCode(gene_id_list):
-        """
-        """
-        # test input is of the right form
-        if not (type(gene_id_list) is list):
-            raise TypeError('gene_id_list must be a list (even if only one value!). Here type(gene_indexs_list)=', type(gene_indexs_list))
-
-        gene_id_list = [index_to_id_dict[idx] for idx in gene_id_list]
-
-    @staticmethod
-    def getJr358Genes():
-        """The function returns the 358 genes that Joshua Rees classified for potential KOs."""
-        return ('MG_001', 'MG_003', 'MG_004', 'MG_005', 'MG_006', 'MG_007', 'MG_008', 'MG_009', 'MG_012', 'MG_013', 'MG_014', 'MG_015', 'MG_019', 'MG_020', 'MG_021', 'MG_022', 'MG_023', 'MG_026', 'MG_027', 'MG_029', 'MG_030', 'MG_031', 'MG_033', 'MG_034', 'MG_035', 'MG_036', 'MG_037', 'MG_038', 'MG_039', 'MG_040', 'MG_041', 'MG_042', 'MG_043', 'MG_044', 'MG_045', 'MG_046', 'MG_047', 'MG_048', 'MG_049', 'MG_050', 'MG_051', 'MG_052', 'MG_053', 'MG_055', 'MG_473', 'MG_058', 'MG_059', 'MG_061', 'MG_062', 'MG_063', 'MG_064', 'MG_065', 'MG_066', 'MG_069', 'MG_070', 'MG_071', 'MG_072', 'MG_073', 'MG_075', 'MG_077', 'MG_078', 'MG_079', 'MG_080', 'MG_081', 'MG_082', 'MG_083', 'MG_084', 'MG_085', 'MG_086', 'MG_087', 'MG_088', 'MG_089', 'MG_090', 'MG_091', 'MG_092', 'MG_093', 'MG_094', 'MG_097', 'MG_098', 'MG_099', 'MG_100', 'MG_101', 'MG_102', 'MG_476', 'MG_104', 'MG_105', 'MG_106', 'MG_107', 'MG_109', 'MG_110', 'MG_111', 'MG_112', 'MG_113', 'MG_114', 'MG_118', 'MG_119', 'MG_120', 'MG_121', 'MG_122', 'MG_123', 'MG_124', 'MG_126', 'MG_127', 'MG_128', 'MG_130', 'MG_132', 'MG_136', 'MG_137', 'MG_139', 'MG_141', 'MG_142', 'MG_143', 'MG_145', 'MG_149', 'MG_150', 'MG_151', 'MG_152', 'MG_153', 'MG_154', 'MG_155', 'MG_156', 'MG_157', 'MG_158', 'MG_159', 'MG_160', 'MG_161', 'MG_162', 'MG_163', 'MG_164', 'MG_165', 'MG_166', 'MG_167', 'MG_168', 'MG_169', 'MG_170', 'MG_171', 'MG_172', 'MG_173', 'MG_174', 'MG_175', 'MG_176', 'MG_177', 'MG_178', 'MG_179', 'MG_180', 'MG_181', 'MG_182', 'MG_183', 'MG_184', 'MG_186', 'MG_187', 'MG_188', 'MG_189', 'MG_190', 'MG_191', 'MG_192', 'MG_194', 'MG_195', 'MG_196', 'MG_197', 'MG_198', 'MG_200', 'MG_201', 'MG_203', 'MG_204', 'MG_205', 'MG_206', 'MG_208', 'MG_209', 'MG_210', 'MG_481', 'MG_482', 'MG_212', 'MG_213', 'MG_214', 'MG_215', 'MG_216', 'MG_217', 'MG_218', 'MG_221', 'MG_224', 'MG_225', 'MG_226', 'MG_227', 'MG_228', 'MG_229', 'MG_230', 'MG_231', 'MG_232', 'MG_234', 'MG_235', 'MG_236', 'MG_238', 'MG_239', 'MG_240', 'MG_244', 'MG_245', 'MG_249', 'MG_250', 'MG_251', 'MG_252', 'MG_253', 'MG_254', 'MG_257', 'MG_258', 'MG_259', 'MG_261', 'MG_262', 'MG_498', 'MG_264', 'MG_265', 'MG_266', 'MG_270', 'MG_271', 'MG_272', 'MG_273', 'MG_274', 'MG_275', 'MG_276', 'MG_277', 'MG_278', 'MG_282', 'MG_283', 'MG_287', 'MG_288', 'MG_289', 'MG_290', 'MG_291', 'MG_292', 'MG_293', 'MG_295', 'MG_297', 'MG_298', 'MG_299', 'MG_300', 'MG_301', 'MG_302', 'MG_303', 'MG_304', 'MG_305', 'MG_309', 'MG_310', 'MG_311', 'MG_312', 'MG_315', 'MG_316', 'MG_317', 'MG_318', 'MG_321', 'MG_322', 'MG_323', 'MG_324', 'MG_325', 'MG_327', 'MG_329', 'MG_330', 'MG_333', 'MG_334', 'MG_335', 'MG_517', 'MG_336', 'MG_339', 'MG_340', 'MG_341', 'MG_342', 'MG_344', 'MG_345', 'MG_346', 'MG_347', 'MG_349', 'MG_351', 'MG_352', 'MG_353', 'MG_355', 'MG_356', 'MG_357', 'MG_358', 'MG_359', 'MG_361', 'MG_362', 'MG_363', 'MG_522', 'MG_365', 'MG_367', 'MG_368', 'MG_369', 'MG_370', 'MG_372', 'MG_375', 'MG_376', 'MG_378', 'MG_379', 'MG_380', 'MG_382', 'MG_383', 'MG_384', 'MG_385', 'MG_386', 'MG_387', 'MG_390', 'MG_391', 'MG_392', 'MG_393', 'MG_394', 'MG_396', 'MG_398', 'MG_399', 'MG_400', 'MG_401', 'MG_402', 'MG_403', 'MG_404', 'MG_405', 'MG_407', 'MG_408', 'MG_409', 'MG_410', 'MG_411', 'MG_412', 'MG_417', 'MG_418', 'MG_419', 'MG_421', 'MG_424', 'MG_425', 'MG_426', 'MG_427', 'MG_428', 'MG_429', 'MG_430', 'MG_431', 'MG_433', 'MG_434', 'MG_435', 'MG_437', 'MG_438', 'MG_442', 'MG_444', 'MG_445', 'MG_446', 'MG_447', 'MG_448', 'MG_451', 'MG_453', 'MG_454', 'MG_455', 'MG_457', 'MG_458', 'MG_460', 'MG_462', 'MG_463', 'MG_464', 'MG_465', 'MG_466', 'MG_467', 'MG_468', 'MG_526', 'MG_470')
+	return ko_name_to_set_dict

@@ -38,6 +38,7 @@ class BaseJobSubmission(metaclass=ABCMeta):
         self.cluster_job_number = None
         self.time_of_submission = None
 
+
     # ABSTRACT METHODS
     ## createAllFiles function creates all the files needed by the submission. This will vary depending on type of job and so is left as an abstract method.
     ## The createListOfClusterDirectoriesNeeded and createDictOfFileSourceToFileDestinations functions are needed in order to know what files and where they need to be on the cluster. This will vary depending on type of job and so is left as an abstract method that will be properly codeed in the child class that will inherit from this.
@@ -73,7 +74,6 @@ class BaseJobSubmission(metaclass=ABCMeta):
         self.createAllFiles()
 
         # 2. construct the bash command to create the neccessary directories should they not be present.
-        self.list_of_directories_to_make_on_cluster
         makedir_commands_list = ['mkdir -p ' + directory for directory in self.list_of_directories_to_make_on_cluster]
         # create directories on the cluster passing the "sendCommand" function through the "checkSuccess" function which are from the cluster_connection (this is of the form of the base_connection abstract class) which was passed when this class was instantiated.
         makedir_output_dict = self.cluster_connection.checkSuccess(self.cluster_connection.sendCommand, makedir_commands_list)
@@ -160,5 +160,5 @@ class BaseManageSubmission(metaclass=ABCMeta):
     # ABSTRACT METHODS
     @abstractmethod
     # This method is to monitor the progress of a job and perform other job related to the job like data processing and updating of databases etc
-    def monitorSubmission(self, submission):
+    def monitorSubmission(self):
         pass

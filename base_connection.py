@@ -14,7 +14,7 @@ class Connection(metaclass=ABCMeta):
     MOST IMPORTANTLY whenever you make any kind of connection to the remote computer you want to make sure that the remote computer got the messge and if it didn't then you need to be able to keep retrying without overloading the remote computer with connection requests (i.e. DDoS attack).
     """
     
-    def __init__(self, remote_user_name, ssh_config_alias, path_to_key, forename_of_user, surname_of_user, user_email, affiliation = None):
+    def __init__(self, remote_user_name, ssh_config_alias, forename_of_user, surname_of_user, user_email, affiliation = None):
         """
         In order to initiate this class the user must have their ssh config file set up to have their cluster connection as an alias. It is best to set this up on a secure ccomputer that you trusst and have an encryption key without a password. Details about setting up the SSH config file can be found at my website.
         
@@ -28,7 +28,6 @@ class Connection(metaclass=ABCMeta):
         Args:
             remote_user_name (str): The username used on the remote computer, (i.e. user_name).
             ssh_config_alias (str): The name given to the SSH connection (i.e. ssh_config_alias).
-            path_to_key (str): The path, and name, to the encryption key (i.e. /home/local_user_name/.ssh/path_to_key/key_name).
             forename_of_user (str): Your first name.
             surname_of_user (str): Your surname.
             user_email (str): Your email address.
@@ -36,9 +35,8 @@ class Connection(metaclass=ABCMeta):
 
         self.user_name = remote_user_name
         self.ssh_config_alias = ssh_config_alias
-        self.path_to_key = path_to_key
         self.forename_of_user = forename_of_user
-        self.surename_of_user = surname_of_user
+        self.surname_of_user = surname_of_user
         self.user_email = user_email
         self.affiliation = affiliation
 
@@ -152,7 +150,6 @@ class Connection(metaclass=ABCMeta):
         # the -T flag in ssh is there because if you don't it opens a new instance of ssh everytime this function is run. It doesn't take long until your computer reaches it's maximum processes and then suddenly nothing can do anything because all the possible processes are being taken up by ssh instances not doing anything.
         sshProcess = subprocess.Popen(['ssh', '-T', self.ssh_config_alias], stdin=subprocess.PIPE, stdout = subprocess.PIPE, universal_newlines=True, bufsize=0)
         command = '\n'.join(list_of_shell_commands)
-        print("command = ", command)
         out, err = sshProcess.communicate(command)
         return_code =  sshProcess.returncode
         sshProcess.stdin.close()
@@ -230,7 +227,83 @@ class Connection(metaclass=ABCMeta):
             raw_output = [1, None]
         return raw_output
 
-class BasePbs(Connection):
+class BaseCluster(Connection):
+    """
+    The Connection class has all the atomistic atrributes that are general to all computers. If one wishes to manage computer clusters then there are additional atomistic attributes. Computer clusters normally have queuing systems and so one needs to be able to sumit and monitor the queues.
+    """
+    def __init__(self, remote_user_name, ssh_config_alias, forename_of_user, surname_of_user, user_email, base_output_path, base_runfiles_path, remote_computer_info, submit_command, affiliation = None):
+        """
+        This is called when the BaseCLuster class is initialised (remember that this can't be initialised directly because it inherits from base_connection.Connection but is missing some of the abstract classes described in base_connection.Connection (also it adds new abstract methods)).
+
+        In order to initiate this class the user must have their ssh config file set up to have their cluster connection as an alias. It is best to set this up on a secure ccomputer that you trust and have an encryption key without a password. Details about setting up the SSH config file can be found at my website.
+        
+        To better explain things I will describe a toy example that all doc strings in this class will refer to. The user has set up an easy connecttion to the remote computer by setting up their ~/.ssh/config file (either directly or through a tunnel) like:
+
+        Host ssh_alias
+            User user_name
+            HostName address_to_remote_computer
+            IdentityFile /home/local_user_name/.ssh/path_to_key/key_name
+
+        Args:
+            remote_user_name (str): The username used on the remote computer, (i.e. user_name).
+            ssh_config_alias (str): The name given to the SSH connection (i.e. ssh_config_alias).
+            forename_of_user (str): Your first name.
+            surname_of_user (str): Your surname.
+            user_email (str): Your email address.
+            base_output_path (str): Absolute path to where you want things saved on the remote computer.
+            base_runfiles_path (str): Absolute path to where you want code files saved (i.e. submission scripts and Python files excecuted remotely etc)
+            remote_computer_info (str): This is information about the remote computer that can be used for identification and for giving credit on scripts etc. For example if it was a cluster then it might be something like: Example Cluster Name (ECN): Advanced Computing Research Centre, Somewhere.
+            
+        """
+        Connection.__init__(self, remote_user_name, ssh_config_alias, forename_of_user, surname_of_user, user_email, affiliation)
+        self.remote_computer_info = remote_computer_info
+        self.base_output_path = base_output_path
+        self.base_runfiles_path = base_runfiles_path
+        self.submit_command = submit_command
+
+    # ABSTRACT METHODS
+
+    @abstractmethod
+    def checkQueue(self):
+        # Clusters normally have some kind of queuing systsem
+        pass
+
+    @abstractmethod
+    def createSubmissionScriptTemplate(self):
+        # One needs to submit jobs to the cluster queue we do this in two parts. 1. A standard template that all submission scripts have (request resources etc). 2. Code specific to the job (what model with what parameters etc). This puts 1. into a list and later 2 is put into a list then those two lists are combined and written to a file.
+        pass
+
+#    @abstractmethod
+#    def createJobSpecificCode(self):
+#        # This function will call createSubmissionScriptTemplate to get the standard template and then add the job specific code after and write it to a file with the correct permissions
+#        pass
+    
+    @abstractmethod
+    def getJobIdFromSubStdOut(self):
+        # When jobs are submitted to the queue a job ID is returned to stdout so that the user can monitor the job. This is a function that when given the raw stdout can return the job number
+        pass
+    
+    # INSTANCE METHODS
+
+    def createStandardSubmissionScript(self, file_name_and_path, pbs_script_list, file_permissions = "700"):
+        """
+        Creates a submission script with appropriate file permissions.
+
+        Args:
+            file_name_and_path (str): The file name (try to use absolute file paths to be safe).
+            pbs_script_list (list of strings): A list of strings where each string is a line of the submission script.
+            file_permisions = "700" (str): The desired file permissions for the submission script (can be numbers or symbols e.g. "700" or "u+x" etc). Submission scripts need to be executable and so the default setting is "700" which is read, write and execute for the user and nothing for anyone else.
+        """
+        # write the code to a file
+        Connection.createLocalFile(file_name_and_path, pbs_script_list, file_permissions)
+
+        # change the permissions if neccessary
+        if file_permissions is not None:
+            subprocess.check_call(["chmod", str(file_permissions), str(file_name_and_path)])
+
+        return
+
+class BasePbs(BaseCluster):
     """
     This is meant to be a template to create a connection object for a standard PBS/TORQUE cluster. This inherits from the base_connect.Connection class in base_connection.py. It will not define ALL of the abstract classes specified in base_connection.Connection and so you will not be able to create an instance of it. One should create a class that inherits this class and add all the neccessary methods to statisfy the base_connection.Connection abstract methods.
 
@@ -240,7 +313,7 @@ class BasePbs(Connection):
          - checkDiskUsage
     """
 
-    def __init__(self, remote_user_name, ssh_config_alias, path_to_key, forename_of_user, surname_of_user, user_email, base_output_path, base_runfiles_path, remote_computer_info):
+    def __init__(self, remote_user_name, ssh_config_alias, forename_of_user, surname_of_user, user_email, base_output_path, base_runfiles_path, remote_computer_info, affiliation = None):
         """
         This is called when the BasePbs class is initialised (remember that this can't be initialised directly because it inherits from base_connection.Connection but is missing some of the abstract classes described in base_connection.Connection).
 
@@ -256,7 +329,6 @@ class BasePbs(Connection):
         Args:
             remote_user_name (str): The username used on the remote computer, (i.e. user_name).
             ssh_config_alias (str): The name given to the SSH connection (i.e. ssh_config_alias).
-            path_to_key (str): The path, and name, to the encryption key (i.e. /home/local_user_name/.ssh/path_to_key/key_name).
             forename_of_user (str): Your first name.
             surname_of_user (str): Your surname.
             user_email (str): Your email address.
@@ -266,11 +338,7 @@ class BasePbs(Connection):
             
         """
         
-        Connection.__init__(self, remote_user_name, ssh_config_alias, path_to_key, forename_of_user, surname_of_user, user_email)
-        self.submit_command = 'qsub'
-        self.remote_computer_info = remote_computer_info
-        self.base_output_path = base_output_path
-        self.base_runfiles_path = base_runfiles_path
+        BaseCluster.__init__(self, remote_user_name, ssh_config_alias, forename_of_user, surname_of_user, user_email, base_output_path, base_runfiles_path, remote_computer_info, 'qsub', affiliation)
 
     # INSTANCE METHODS
     def checkQueue(self, job_number):
@@ -296,7 +364,7 @@ class BasePbs(Connection):
 #            no_of_repetitions_of_each_job (int): Total amount of repetitions of each job.
 #            master_dir (str): The directory on the remote computer that you want the submission script to start in.
 
-    def createPbsSubmissionScriptTemplate(self, pbs_job_name, no_of_nodes, no_of_cores, walltime, queue_name, job_number, outfile_name_and_path, errorfile_name_and_path, initial_message_in_code = None, shebang = "#!/bin/bash"):
+    def createSubmissionScriptTemplate(self, pbs_job_name, no_of_nodes, no_of_cores, job_array_numbers, walltime, queue_name, outfile_name_and_path, errorfile_name_and_path, initial_message_in_code = None, shebang = "#!/bin/bash\n"):
         """
         This creates a template for a submission script for the cluster however it does not contain any code for specific jobs (basically just the PBS commands and other bits that might be useful for debugging). It puts it all into a list where list[0] will be line number one of the file and list[2] will be line number two of the file etc and returns that list.
 
@@ -316,26 +384,26 @@ class BasePbs(Connection):
         """
 
         # add the first part of the template to the list
-        list_of_pbs_commands = [shebang + "\n", "\n", "# This script was created using Oliver Chalkley's computer_communication_framework library - https://github.com/Oliver-Chalkley/computer_communication_framework." + "\n", "# "]
+        list_of_pbs_commands = [shebang, "# This script was created using Oliver Chalkley's computer_communication_framework library - https://github.com/Oliver-Chalkley/computer_communication_framework.\n"]
         
         
         # Only want to put the users initial message if she has one
         if initial_message_in_code is not None:
-            list_of_pbs_commands += [initial_message_in_code + "\n"]
+            list_of_pbs_commands += [initial_message_in_code]
 
         # add the next part of the template
-        list_of_pbs_commands = ["# Title: " + pbs_job_name + "\n", "# User: " + self.forename_of_user + ", " + self.surename_of_user + ", " + self.user_email + "\n"]
+        list_of_pbs_commands += ["# Title: " + pbs_job_name, "# User: " + self.forename_of_user + ", " + self.surname_of_user + ", " + self.user_email + "\n"]
 
         # Only want to put affiliation if there is one
-        if type(self.affiliation) is not None: 
-            list_of_pbs_commands += ["# Affiliation: " + self.affiliation + "\n"]
+        if self.affiliation is not None: 
+            list_of_pbs_commands += ["# Affiliation: " + self.affiliation]
             
         # add the next part of the template to the list
-        list_of_pbs_commands += ["# Last Updated: " + str(datetime.datetime.now()) + "\n", "\n", "## Job name" + "\n", "#PBS -N " + pbs_job_name + "\n", "\n", "## Resource request" + "\n", "#PBS -l nodes=" + str(no_of_nodes) + ":ppn=" + str(no_of_cores) + ",walltime=" + walltime + "\n", "#PBS -q " + queue_name + "\n", "\n", "## Job array request" + "\n", "#PBS -t " + job_array_numbers + "\n", "\n", "## designate output and error files" + "\n", "#PBS -e " + outfile_name_and_path + "\n", "#PBS -o " + errorfile_name_and_path + "\n", "\n", "# print some details about the job" + "\n", 'echo "The Array ID is: ${PBS_ARRAYID}"' + "\n", 'echo Running on host `hostname`' + "\n", 'echo Time is `date`' + "\n", 'echo Directory is `pwd`' + "\n", 'echo PBS job ID is ${PBS_JOBID}' + "\n", 'echo This job runs on the following nodes:' + "\n", 'echo `cat $PBS_NODEFILE | uniq`' + "\n", "\n"]
+        list_of_pbs_commands += ["# Last Updated: " + str(datetime.datetime.now()) + "\n", "## Job name", "#PBS -N " + pbs_job_name + "\n", "## Resource request", "#PBS -l nodes=" + str(no_of_nodes) + ":ppn=" + str(no_of_cores) + ",walltime=" + str(walltime), "#PBS -q " + queue_name + "\n", "## Job array request", "#PBS -t " + str(job_array_numbers) + "\n", "## designate output and error files", "#PBS -e " + outfile_name_and_path, "#PBS -o " + errorfile_name_and_path + "\n", "# print some details about the job", 'echo "The Array ID is: ${PBS_ARRAYID}"', 'echo Running on host `hostname`', 'echo Time is `date`', 'echo Directory is `pwd`', 'echo PBS job ID is ${PBS_JOBID}', 'echo This job runs on the following nodes:', 'echo `cat $PBS_NODEFILE | uniq`' + "\n"]
 
         return list_of_pbs_commands
 
-    def createStandardSubmissionScript(self, file_name_and_path, list_of_job_specific_code, pbs_job_name, no_of_nodes, no_of_cores, queue_name, outfile_name_and_path, errorfile_name_and_path, walltime, initial_message_in_code = None, file_permissions = "700", shebang = "#!/bin/bash"):
+    def createStandardSubmissionScriptList(self, file_name_and_path, list_of_job_specific_code, pbs_job_name, no_of_nodes, no_of_cores, array_nos, walltime, queue_name, outfile_name_and_path, errorfile_name_and_path, initial_message_in_code = None, file_permissions = "700", shebang = "#!/bin/bash\n"):
         """
         This creates a PBS submission script based on the resources you request and the job specific code that you supply. It then writes this code to a file that you specify.
 
@@ -355,129 +423,11 @@ class BasePbs(Connection):
         """
 
         # Create the PBS template
-        pbs_script_list = self.createPbsSubmissionScriptCommands(initial_message_in_code, pbs_job_name, no_of_nodes, no_of_cores, walltime, queue_name, job_number, outfile_name_and_path, errorfile_name_and_path, shebang = "#!/bin/bash")
+        pbs_script_list = self.createSubmissionScriptTemplate(pbs_job_name, no_of_nodes, no_of_cores, array_nos, walltime, queue_name, outfile_name_and_path, errorfile_name_and_path, initial_message_in_code, shebang)
         # Add the code that is specific to this job
         pbs_script_list += list_of_job_specific_code
-        
-        # write the code to a file
-        Connection.createLocalFile(file_name_and_path, pbs_script_list, file_permisions = "700")
 
-        # change the permissions if neccessary
-        if file_permissions != None:
-            subprocess.check_call(["chmod", str(file_permissions), str(output_filename)])
-
-        return
-
-# DELETE THIS ONCE EVERYTHING HAS BEEN DONE
-
-#    def createStandardSubmissionScript(self, output_filename, pbs_job_name, queue_name, no_of_unique_jobs, no_of_repetitions_of_each_job, master_dir, outfile_name_and_path, errorfile_name_and_path, walltime, initial_message_in_code, list_of_job_specific_code):
-#        """
-#        This acts as a template for a submission script for the cluster however it does not contain any code for specific jobs. This code is pass to the function through the list_of_job_specific_code variable.
-#
-#        The format for a submission in this case will be an array of jobs. Here we want to be able to specify a number of unique jobs and then the amount of times we wish to repeat each unique job. This will then split all the jobs across arrays and CPUs on the cluster depending on how many are given. Each unique job has a name and some settings, this is stored on the cluster in 2 files job_names_file and job_settings_file, respectively.
-#
-#        Args:
-#            output_filename (str): The name of the submission script.
-#            pbs_job_name (str): The name given to the queuing system.
-#            queue_name (str): This cluster has a choice of queues and this variable specifies which one to use.
-#            no_of_unique_jobs (int): Total amount of jobs to run.
-#            no_of_repetitions_of_each_job (int): Total amount of repetitions of each job.
-#            master_dir (str): The directory on the remote computer that you want the submission script to start in.
-#            outfile_name_and_path (str): Absolute path and file name of where you want the outfiles of each job array stored.
-#            errorfile_name_and_path (str): Absolute path and file name of where you want to store the errorfiles of each job array stored.
-#            walltime (str): The maximum amount of time the job is allowed to take. Has the form 'HH:MM:SS'.
-#            initial_message_in_code (str): The first comment in the code normally says a little something about where this script came from. NOTE: You do not need to include a '#' to indicat it is a comment.
-#            list_of_job_specific_code (list of strings): Each element of the list contains a string of one line of code.
-#
-#        Returns:
-#            output_dict (dict): Contains details of how it spread the jobs across arrays and CPUs. Has keys, 'no_of_arrays', 'no_of_unique_jobs_per_array_job', 'no_of_repetitions_of_each_job', 'no_of_sims_per_array_job', and 'list_of_rep_dir_names'.
-#        """
-#
-#        # set job array numbers to None so that we can check stuff has worked later
-#        job_array_numbers = None
-#        # The maximum job array size on the cluster.
-#        max_job_array_size = 500
-#        # initialise output dict
-#        output_dict = {}
-#        # test that a reasonable amount of jobs has been submitted (This is not a hard and fast rule but there has to be a max and my intuition suggestss that it will start to get complicated around this level i.e. queueing and harddisk space etc)
-#        total_sims = no_of_unique_jobs * no_of_repetitions_of_each_job
-#        if total_sims > 20000:
-#            raise ValueError('Total amount of simulations for one batch submission must be less than 20,000, here total_sims=',total_sims)
-#
-#        output_dict['total_sims'] = total_sims
-#        # spread simulations across array jobs
-#        if no_of_unique_jobs <= max_job_array_size:
-#            no_of_unique_jobs_per_array_job = 1
-#            no_of_arrays = no_of_unique_jobs
-#            job_array_numbers = '1-' + str(no_of_unique_jobs)
-#        else:
-#            # job_array_size * no_of_unique_jobs_per_array_job = no_of_unique_jobs so all the factors of no_of_unique_jobs is
-#            common_factors = [x for x in range(1, no_of_unique_jobs+1) if no_of_unique_jobs % x == 0]
-#            # make the job_array_size as large as possible such that it is less than max_job_array_size
-#            factor_idx = len(common_factors) - 1
-#            while factor_idx >= 0:
-#                if common_factors[factor_idx] < max_job_array_size:
-#                    job_array_numbers = '1-' + str(common_factors[factor_idx])
-#                    no_of_arrays = common_factors[factor_idx]
-#                    no_of_unique_jobs_per_array_job = common_factors[(len(common_factors)-1) - factor_idx]
-#                    factor_idx = -1
-#                else:
-#                    factor_idx -= 1
-#
-#            # raise error if no suitable factors found!
-#            if job_array_numbers is None:
-#                raise ValueError('job_array_numbers should have been assigned by now! This suggests that it wasn\'t possible for my algorithm to split the KOs across the job array properly. Here no_of_unique_jobs=', no_of_unique_jobs, ' and the common factors of this number are:', common_factors)
-#
-#        output_dict['no_of_arrays'] = no_of_arrays
-#        output_dict['no_of_unique_jobs_per_array_job'] = no_of_unique_jobs_per_array_job
-#        output_dict['no_of_repetitions_of_each_job'] = no_of_repetitions_of_each_job
-#        # calculate the amount of cores per array job - NOTE: for simplification we only use cores and not nodes (this is generally the fastest way to get through the queue anyway)
-#        no_of_cores = no_of_repetitions_of_each_job * no_of_unique_jobs_per_array_job
-#        output_dict['no_of_sims_per_array_job'] = no_of_cores
-#        output_dict['list_of_rep_dir_names'] = list(range(1, no_of_repetitions_of_each_job + 1))
-#        no_of_nodes = 1
-#        # write the script to file
-#        with open(output_filename, mode='wt', encoding='utf-8') as myfile:
-#            myfile.write("#!/bin/bash" + "\n")
-#            myfile.write("\n")
-#            myfile.write("# This script was created using Oliver Chalkley's computer_communication_framework library - https://github.com/OliCUoB/computer_communication_framework." + "\n")
-#            myfile.write("# " + initial_message_in_code + "\n")
-#            myfile.write("# Title: " + pbs_job_name + "\n")
-#            myfile.write("# User: " + self.forename_of_user + ", " + self.surename_of_user + ", " + self.user_email + "\n")
-#            if type(self.affiliation) is not None:
-#                myfile.write("# Affiliation: " + self.affiliation + "\n")
-#            myfile.write("# Last Updated: " + str(datetime.datetime.now()) + "\n")
-#            myfile.write("\n")
-#            myfile.write("## Job name" + "\n")
-#            myfile.write("#PBS -N " + pbs_job_name + "\n")
-#            myfile.write("\n")
-#            myfile.write("## Resource request" + "\n")
-#            myfile.write("#PBS -l nodes=" + str(no_of_nodes) + ":ppn=" + str(no_of_cores) + ",walltime=" + walltime + "\n")
-#            myfile.write("#PBS -q " + queue_name + "\n")
-#            myfile.write("\n")
-#            myfile.write("## Job array request" + "\n")
-#            myfile.write("#PBS -t " + job_array_numbers + "\n")
-#            myfile.write("\n")
-#            myfile.write("## designate output and error files" + "\n")
-#            myfile.write("#PBS -e " + outfile_name_and_path + "\n")
-#            myfile.write("#PBS -o " + errorfile_name_and_path + "\n")
-#            myfile.write("\n")
-#            myfile.write("# print some details about the job" + "\n")
-#            myfile.write('echo "The Array ID is: ${PBS_ARRAYID}"' + "\n")
-#            myfile.write('echo Running on host `hostname`' + "\n")
-#            myfile.write('echo Time is `date`' + "\n")
-#            myfile.write('echo Directory is `pwd`' + "\n")
-#            myfile.write('echo PBS job ID is ${PBS_JOBID}' + "\n")
-#            myfile.write('echo This job runs on the following nodes:' + "\n")
-#            myfile.write('echo `cat $PBS_NODEFILE | uniq`' + "\n")
-#            myfile.write("\n")
-#            for line in list_of_job_specific_code:
-#                myfile.write(line)
-#
-#        # give the file execute permissions
-#        subprocess.check_call(["chmod", "700", str(output_filename)])
-#
-#        return output_dict
+        return pbs_script_list
 
     def getJobIdFromSubStdOut(self, stdout):
         """
@@ -492,3 +442,124 @@ class BasePbs(Connection):
         
         return int(re.search(r'\d+', stdout).group())
 
+class BaseSlurm(BaseCluster):
+    """
+    This is meant to be a template to create a connection object for a standard PBS/TORQUE cluster. This inherits from the base_connect.Connection class in base_connection.py. It will not define ALL of the abstract classes specified in base_connection.Connection and so you will not be able to create an instance of it. One should create a class that inherits this class and add all the neccessary methods to statisfy the base_connection.Connection abstract methods.
+
+    This is meant to contain the BASIC commands that can be used by programs to control the remote computer (that aren't already included in base_connection.Connection). This is atomistic level commands that form the basis of more complex and specific programs.
+
+    Abstract methods that are left out are:
+         - checkDiskUsage
+    """
+
+    def __init__(self, remote_user_name, ssh_config_alias, forename_of_user, surname_of_user, user_email, base_output_path, base_runfiles_path, remote_computer_info, affiliation = None):
+        """
+        This is called when the BasePbs class is initialised (remember that this can't be initialised directly because it inherits from base_connection.Connection but is missing some of the abstract classes described in base_connection.Connection).
+
+        In order to initiate this class the user must have their ssh config file set up to have their cluster connection as an alias. It is best to set this up on a secure ccomputer that you trusst and have an encryption key without a password. Details about setting up the SSH config file can be found at my website.
+        
+        To better explain things I will describe a toy example that all doc strings in this class will refer to. The user has set up an easy connecttion to the remote computer by setting up their ~/.ssh/config file (either directly or through a tunnel) like:
+
+        Host ssh_alias
+            User user_name
+            HostName address_to_remote_computer
+            IdentityFile /home/local_user_name/.ssh/path_to_key/key_name
+
+        Args:
+            remote_user_name (str): The username used on the remote computer, (i.e. user_name).
+            ssh_config_alias (str): The name given to the SSH connection (i.e. ssh_config_alias).
+            forename_of_user (str): Your first name.
+            surname_of_user (str): Your surname.
+            user_email (str): Your email address.
+            base_output_path (str): Absolute path to where you want things saved on the remote computer.
+            base_runfiles_path (str): Absolute path to where you want code files saved (i.e. submission scripts and Python files excecuted remotely etc)
+            remote_computer_info (str): This is information about the remote computer that can be used for identification and for giving credit on scripts etc. For example if it was a cluster then it might be something like: Example Cluster Name (ECN): Advanced Computing Research Centre, Somewhere.
+            
+        """
+        
+        BaseCluster.__init__(self, remote_user_name, ssh_config_alias, forename_of_user, surname_of_user, user_email, base_output_path, base_runfiles_path, remote_computer_info, 'squeue', affiliation)
+
+    # INSTANCE METHODS
+    def checkQueue(self, job_number):
+        """
+        This function needs to be implemented!
+        """
+        pass
+
+    def createSubmissionScriptTemplate(self, job_name, no_of_nodes, no_of_cores, job_array_numbers, walltime, queue_name, outfile_name_and_path, errorfile_name_and_path, initial_message_in_code = None, shebang = "#!/bin/bash\n"):
+        """
+        This creates a template for a submission script for the cluster however it does not contain any code for specific jobs (basically just the PBS commands and other bits that might be useful for debugging). It puts it all into a list where list[0] will be line number one of the file and list[2] will be line number two of the file etc and returns that list.
+
+        Args:
+            job_name (str): The name given to the queuing system.
+            no_of_nodes (int): The number of nodes that the user would like to request.
+            no_of_cores (int): The number of cores that the user would like to request.
+            walltime (str): The maximum amount of time the job is allowed to take. Has the form 'HH:MM:SS'.
+            queue_name (str): PBS/Torque clusters have a choice of queues and this variable specifies which one to use.
+            outfile_name_and_path (str): Absolute path and file name of where you want the outfiles of each job array stored.
+            errorfile_name_and_path (str): Absolute path and file name of where you want to store the errorfiles of each job array stored.
+            initial_message_in_code (str): The first comment in the code normally says a little something about where this script came from. NOTE: You do not need to include a '#' to indicat it is a comment.
+            initial_message_in_code == None (str): Should the user wish to put a meaasge near the top of the script (maybe explanation or something) then they can add it here as a string. If it's value is None (the default value) then the line is omitted.
+
+        Returns:
+            list_of_commands (list of strings): Each string represents the line of a submission file and the list as a whole is the beginning of a PBS submission script.
+        """
+
+        # add the first part of the template to the list
+        list_of_commands = [shebang, "# This script was created using Oliver Chalkley's computer_communication_framework library - https://github.com/Oliver-Chalkley/computer_communication_framework.\n"]
+        
+        
+        # Only want to put the users initial message if she has one
+        if initial_message_in_code is not None:
+            list_of_commands += [initial_message_in_code]
+
+        # add the next part of the template
+        list_of_commands += ["# Title: " + job_name, "# User: " + self.forename_of_user + ", " + self.surname_of_user + ", " + self.user_email + "\n"]
+
+        # Only want to put affiliation if there is one
+        if self.affiliation is not None: 
+            list_of_commands += ["# Affiliation: " + self.affiliation]
+            
+        # add the next part of the template to the list
+        list_of_commands += ["# Last Updated: " + str(datetime.datetime.now()) + "\n", "## Job name", "#SBATCH --job-name=" + job_name + "\n", "## Resource request", "#SBATCH --ntasks=" + str(no_of_cores) + " # No. of cores", "#SBATCH --time=" + walltime, "#SBATCH -p " + queue_name + "\n", "## Job array request", "#SBATCH --array=" + job_array_numbers + "\n", "## designate output and error files", "#SBATCH --output=" + outfile_name_and_path + "_%A_%a.out", "#SBATCH --error=" + errorfile_name_and_path + "_%A_%a.err" + "\n", "# print some details about the job", 'echo "The Array TASK ID is: ${SLURM_ARRAY_TASK_ID}"', 'echo "The Array JOB ID is: ${SLURM_ARRAY_JOB_ID}"', 'echo Running on host `hostname`', 'echo Time is `date`', 'echo Directory is `pwd`' + "\n"]
+
+        return list_of_commands
+
+    def createStandardSubmissionScriptList(self, file_name_and_path, list_of_job_specific_code, pbs_job_name, no_of_nodes, no_of_cores, array_nos, walltime, queue_name, outfile_name_and_path, errorfile_name_and_path, initial_message_in_code = None, file_permissions = "700", shebang = "#!/bin/bash\n"):
+        """
+        This creates a PBS submission script based on the resources you request and the job specific code that you supply. It then writes this code to a file that you specify.
+
+        Args:
+            file_name_and_path (str): Absolute path plus filename that you wish to save the PBS submission script to e.g. /path/to/file/pbs_submission_script.sh.
+            list_of_job_specific_code (list of strings): Each element of the list contains a string of one line of code. Note: This code is appended to the end of the submission script.
+            pbs_job_name (str): The name given to this job.
+            no_of_nodes (int): The number of nodes that the user would like to request.
+            no_of_cores (int): The number of cores that the user would like to request.
+            queue_name (str): PBS/Torque clusters have a choice of queues and this variable specifies which one to use.
+            outfile_name_and_path (str): Absolute path and file name of where you want the outfiles of each job array stored.
+            errorfile_name_and_path (str): Absolute path and file name of where you want to store the errorfiles of each job array stored.
+            walltime (str): The maximum amount of time the job is allowed to take. Has the form 'HH:MM:SS'.
+            initial_message_in_code == None (str): Should the user wish to put a meaasge near the top of the script (maybe explanation or something) then they can add it here as a string. If it's value is None (the default value) then the line is omitted.
+            file_permissions = "700" (str): The file permissions that the user would like the PBS submission script to have. If it is None then it will not attempt to change the settings. The default setting, 700, makes it read, write and executable only to the user. NOTE: For the submission script to work one needs to make it executable.
+            shebang = "#!/bin/bash" (str): The shebang line tells the operating system what interpreter to use when executing this script. The default interpreter is BASH which is normally found in /bin/bash.
+        """
+
+        # Create the PBS template
+        pbs_script_list = self.createSubmissionScriptTemplate(pbs_job_name, no_of_nodes, no_of_cores, array_nos, walltime, queue_name, outfile_name_and_path, errorfile_name_and_path, initial_message_in_code, shebang)
+        # Add the code that is specific to this job
+        pbs_script_list += list_of_job_specific_code
+
+        return pbs_script_list
+
+    def getJobIdFromSubStdOut(self, stdout):
+        """
+        When one submits a job to the cluster it returns the job ID to the stdout. This function takes that stdout and extracts the job ID so that it can be used to monitor the job if neccessary.
+
+        Args:
+            stdout (str): The stdout after submitting a job to the queue.
+
+        Returns:
+            return (int): The job ID of the job submitted which returned stdout.
+        """
+        
+        return int(re.search(r'\d+', stdout).group())
