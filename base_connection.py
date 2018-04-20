@@ -109,7 +109,7 @@ class Connection(metaclass=ABCMeta):
 
     def remoteConnection(self, list_of_remote_commands):
         """
-        This sends a list of commands to a remote computer. It is hard to use the localShellCommand to send remote commands, there are warnings about using the sendCommand function due to malicious injection but subprocess.Popen seems to not suffer from these problems (I don't see how this is any more proteted from malicious inject than sendCommand but there doesn't seem to be warnings). As a result of the above this should be the prefered method to send commands to the remote computer.
+        This sends a list of commands to a remote computer. It is hard to use the localShellCommand to send remote commands, there are warnings about using the sendCommand function due to malicious injection but subprocess.Popen seems to not suffer from these problems (I don't see how this is any more proteted from malicious injections than sendCommand but there doesn't seem to be warnings). As a result of the above this should be the prefered method to send commands to the remote computer but in the end teh user needs to take responsibility for making the correct decision for their particular case. Should someone be creating something where the end user should not have access to a function (say the sendCommand function) then they should overload the sendCommand function in a child class with something harmless (e.g. pass).
 
         Args:
             list_of_remote_commands (list of strings): Each string is a whole command that you wish to be sent to the remote computer e.g. ['ls -l', 'df -h ./'].
@@ -118,7 +118,7 @@ class Connection(metaclass=ABCMeta):
             output_dict (dict): Is a dictionary which contains lists of the stdout, stdin and stderr.
         """
 
-        ssh = subprocess.Popen(["ssh",
+        ssh = subprocess.Popen(["ssh", "-T",
                                 self.ssh_config_alias],
                                 stdin=subprocess.PIPE,
                                 stdout=subprocess.PIPE,
@@ -130,7 +130,7 @@ class Connection(metaclass=ABCMeta):
         input_cmd = "\n".join(list_of_remote_commands) + "\n"
         output, error = ssh.communicate(input_cmd)
          
-        output_dict = {'return_code': ssh.returncode, 'stdin': input_cmd, 'stdout': output, 'stderr': error}
+        output_dict = {'return_code': ssh.returncode, 'stdout': output, 'stderr': error}
 
         return output_dict
 
@@ -225,6 +225,7 @@ class Connection(metaclass=ABCMeta):
             raw_output = [0, subprocess.check_output(commands_as_a_list)]
         except Exception:
             raw_output = [1, None]
+
         return raw_output
 
 class BaseCluster(Connection):
@@ -297,10 +298,6 @@ class BaseCluster(Connection):
         # write the code to a file
         Connection.createLocalFile(file_name_and_path, pbs_script_list, file_permissions)
 
-        # change the permissions if neccessary
-        if file_permissions is not None:
-            subprocess.check_call(["chmod", str(file_permissions), str(file_name_and_path)])
-
         return
 
 class BasePbs(BaseCluster):
@@ -355,14 +352,9 @@ class BasePbs(BaseCluster):
                 # -t flag shows all array jobs related to one job number, if that job is an array.
         grep_part_of_cmd = "qstat -tu " + self.user_name + " | grep " + str(job_number) + " | awk \'{print $1}\' | awk -F \"[][]\" \'{print $2}\'"
 
-        output_dict = self.checkSuccess(self.sendCommand([grep_part_of_cmd])) # Remember that all commands should be passed through the "checkSuccess" function that is inherited from the Connection class.
+        output_dict = self.checkSuccess(self.remoteConnection, [grep_part_of_cmd]) # Remember that all commands should be passed through the "checkSuccess" function that is inherited from the Connection class.
 
         return output_dict
-
-# STUFF FOR THE BC3 CHILD CLASS!!!
-#            no_of_unique_jobs (int): Total amount of jobs to run.
-#            no_of_repetitions_of_each_job (int): Total amount of repetitions of each job.
-#            master_dir (str): The directory on the remote computer that you want the submission script to start in.
 
     def createSubmissionScriptTemplate(self, pbs_job_name, no_of_nodes, no_of_cores, job_array_numbers, walltime, queue_name, outfile_name_and_path, errorfile_name_and_path, initial_message_in_code = None, shebang = "#!/bin/bash\n"):
         """
@@ -399,11 +391,11 @@ class BasePbs(BaseCluster):
             list_of_pbs_commands += ["# Affiliation: " + self.affiliation]
             
         # add the next part of the template to the list
-        list_of_pbs_commands += ["# Last Updated: " + str(datetime.datetime.now()) + "\n", "## Job name", "#PBS -N " + pbs_job_name + "\n", "## Resource request", "#PBS -l nodes=" + str(no_of_nodes) + ":ppn=" + str(no_of_cores) + ",walltime=" + str(walltime), "#PBS -q " + queue_name + "\n", "## Job array request", "#PBS -t " + str(job_array_numbers) + "\n", "## designate output and error files", "#PBS -e " + outfile_name_and_path, "#PBS -o " + errorfile_name_and_path + "\n", "# print some details about the job", 'echo "The Array ID is: ${PBS_ARRAYID}"', 'echo Running on host `hostname`', 'echo Time is `date`', 'echo Directory is `pwd`', 'echo PBS job ID is ${PBS_JOBID}', 'echo This job runs on the following nodes:', 'echo `cat $PBS_NODEFILE | uniq`' + "\n"]
+        list_of_pbs_commands += ["# Last Updated: " + str(datetime.datetime.now()) + "\n", "## Job name", "#PBS -N " + pbs_job_name + "\n", "## Resource request", "#PBS -l nodes=" + str(no_of_nodes) + ":ppn=" + str(no_of_cores) + ",walltime=" + str(walltime), "#PBS -q " + queue_name + "\n", "## Job array request", "#PBS -t " + str(job_array_numbers) + "\n", "## designate output and error files", "#PBS -o " + outfile_name_and_path, "#PBS -e " + errorfile_name_and_path + "\n", "# print some details about the job", 'echo "The Array ID is: ${PBS_ARRAYID}"', 'echo Running on host `hostname`', 'echo Time is `date`', 'echo Directory is `pwd`', 'echo PBS job ID is ${PBS_JOBID}', 'echo This job runs on the following nodes:', 'echo `cat $PBS_NODEFILE | uniq`' + "\n"]
 
         return list_of_pbs_commands
 
-    def createStandardSubmissionScriptList(self, file_name_and_path, list_of_job_specific_code, pbs_job_name, no_of_nodes, no_of_cores, array_nos, walltime, queue_name, outfile_name_and_path, errorfile_name_and_path, initial_message_in_code = None, file_permissions = "700", shebang = "#!/bin/bash\n"):
+    def createStandardSubmissionScriptList(self, list_of_job_specific_code, pbs_job_name, no_of_nodes, no_of_cores, array_nos, walltime, queue_name, outfile_name_and_path, errorfile_name_and_path, initial_message_in_code = None, shebang = "#!/bin/bash\n"):
         """
         This creates a PBS submission script based on the resources you request and the job specific code that you supply. It then writes this code to a file that you specify.
 
@@ -477,16 +469,27 @@ class BaseSlurm(BaseCluster):
             
         """
         
-        BaseCluster.__init__(self, remote_user_name, ssh_config_alias, forename_of_user, surname_of_user, user_email, base_output_path, base_runfiles_path, remote_computer_info, 'squeue', affiliation)
+        BaseCluster.__init__(self, remote_user_name, ssh_config_alias, forename_of_user, surname_of_user, user_email, base_output_path, base_runfiles_path, remote_computer_info, 'sbatch', affiliation)
 
     # INSTANCE METHODS
     def checkQueue(self, job_number):
         """
-        This function needs to be implemented!
-        """
-        pass
+        This function must exist to satisfy the abstract class that it inherits from. In this case it takes a job number and returns a list of all the array numbers of that job still running.
+        
+        Args:
+            job_number (int): SLURM assigns a unique integer number to each job. Remeber that a job can actually be an array of jobs.
 
-    def createSubmissionScriptTemplate(self, job_name, no_of_nodes, no_of_cores, job_array_numbers, walltime, queue_name, outfile_name_and_path, errorfile_name_and_path, initial_message_in_code = None, shebang = "#!/bin/bash\n"):
+        Returns:
+            output_dict (dict): Has keys 'return_code', 'stdout', and 'stderr'.
+        """
+
+        grep_part_of_cmd = "squeue -ru " + self.user_name + " | grep \'" + str(job_number) + "\' | awk \'{print $1}\' | awk -F \"_\" \'{print $2}\'"
+
+        output_dict = self.checkSuccess(self.sendCommand, [grep_part_of_cmd])
+
+        return output_dict
+
+    def createSubmissionScriptTemplate(self, job_name, no_of_nodes, no_of_cores, job_array_numbers, walltime, queue_name, outfile_name_and_path, errorfile_name_and_path, slurm_account_name = None, initial_message_in_code = None, shebang = "#!/bin/bash\n"):
         """
         This creates a template for a submission script for the cluster however it does not contain any code for specific jobs (basically just the PBS commands and other bits that might be useful for debugging). It puts it all into a list where list[0] will be line number one of the file and list[2] will be line number two of the file etc and returns that list.
 
@@ -502,30 +505,34 @@ class BaseSlurm(BaseCluster):
             initial_message_in_code == None (str): Should the user wish to put a meaasge near the top of the script (maybe explanation or something) then they can add it here as a string. If it's value is None (the default value) then the line is omitted.
 
         Returns:
-            list_of_commands (list of strings): Each string represents the line of a submission file and the list as a whole is the beginning of a PBS submission script.
+            list_of_slurm_commands (list of strings): Each string represents the line of a submission file and the list as a whole is the beginning of a PBS submission script.
         """
 
         # add the first part of the template to the list
-        list_of_commands = [shebang, "# This script was created using Oliver Chalkley's computer_communication_framework library - https://github.com/Oliver-Chalkley/computer_communication_framework.\n"]
+        list_of_slurm_commands = [shebang, "# This script was created using Oliver Chalkley's computer_communication_framework library - https://github.com/Oliver-Chalkley/computer_communication_framework.\n"]
         
         
         # Only want to put the users initial message if she has one
         if initial_message_in_code is not None:
-            list_of_commands += [initial_message_in_code]
+            list_of_slurm_commands += [initial_message_in_code]
 
         # add the next part of the template
-        list_of_commands += ["# Title: " + job_name, "# User: " + self.forename_of_user + ", " + self.surname_of_user + ", " + self.user_email + "\n"]
+        list_of_slurm_commands += ["# Title: " + job_name, "# User: " + self.forename_of_user + ", " + self.surname_of_user + ", " + self.user_email + "\n"]
 
         # Only want to put affiliation if there is one
         if self.affiliation is not None: 
-            list_of_commands += ["# Affiliation: " + self.affiliation]
+            list_of_slurm_commands += ["# Affiliation: " + self.affiliation]
             
+        # only want to declare an account if you have to
+        if slurm_account_name is not None:
+            list_of_slurm_commands += ["## Declare what account the simulations are registered to", "#SBATCH -A " + slurm_account_name + "\n"]
+
         # add the next part of the template to the list
-        list_of_commands += ["# Last Updated: " + str(datetime.datetime.now()) + "\n", "## Job name", "#SBATCH --job-name=" + job_name + "\n", "## Resource request", "#SBATCH --ntasks=" + str(no_of_cores) + " # No. of cores", "#SBATCH --time=" + walltime, "#SBATCH -p " + queue_name + "\n", "## Job array request", "#SBATCH --array=" + job_array_numbers + "\n", "## designate output and error files", "#SBATCH --output=" + outfile_name_and_path + "_%A_%a.out", "#SBATCH --error=" + errorfile_name_and_path + "_%A_%a.err" + "\n", "# print some details about the job", 'echo "The Array TASK ID is: ${SLURM_ARRAY_TASK_ID}"', 'echo "The Array JOB ID is: ${SLURM_ARRAY_JOB_ID}"', 'echo Running on host `hostname`', 'echo Time is `date`', 'echo Directory is `pwd`' + "\n"]
+        list_of_slurm_commands += ["# Last Updated: " + str(datetime.datetime.now()) + "\n", "## Job name", "#SBATCH --job-name=" + job_name + "\n", "## Resource request", "#SBATCH --ntasks=" + str(no_of_cores) + " # No. of cores", "#SBATCH --time=" + str(walltime) + " # walltime", "#SBATCH -p " + queue_name + " # queue/partition\n", "## Job array request", "#SBATCH --array=" + job_array_numbers + "\n", "## designate output and error files", "#SBATCH --output=" + outfile_name_and_path, "#SBATCH --error=" + errorfile_name_and_path + "\n", "# print some details about the job", 'echo "The Array task ID is: ${SLURM_ARRAY_TASK_ID}"', 'echo "The Array job ID is: ${SLURM_ARRAY_JOB_ID}"', 'echo Running on host `hostname`', 'echo Time is `date`', 'echo Directory is `pwd`' + "\n"]
 
-        return list_of_commands
+        return list_of_slurm_commands
 
-    def createStandardSubmissionScriptList(self, file_name_and_path, list_of_job_specific_code, pbs_job_name, no_of_nodes, no_of_cores, array_nos, walltime, queue_name, outfile_name_and_path, errorfile_name_and_path, initial_message_in_code = None, file_permissions = "700", shebang = "#!/bin/bash\n"):
+    def createStandardSubmissionScriptList(self, list_of_job_specific_code, pbs_job_name, no_of_nodes, no_of_cores, array_nos, walltime, queue_name, outfile_name_and_path, errorfile_name_and_path, slurm_account_name = None, initial_message_in_code = None, shebang = "#!/bin/bash\n"):
         """
         This creates a PBS submission script based on the resources you request and the job specific code that you supply. It then writes this code to a file that you specify.
 
@@ -545,7 +552,7 @@ class BaseSlurm(BaseCluster):
         """
 
         # Create the PBS template
-        pbs_script_list = self.createSubmissionScriptTemplate(pbs_job_name, no_of_nodes, no_of_cores, array_nos, walltime, queue_name, outfile_name_and_path, errorfile_name_and_path, initial_message_in_code, shebang)
+        pbs_script_list = self.createSubmissionScriptTemplate(pbs_job_name, no_of_nodes, no_of_cores, array_nos, walltime, queue_name, outfile_name_and_path, errorfile_name_and_path, slurm_account_name = None, initial_message_in_code = initial_message_in_code, shebang = shebang)
         # Add the code that is specific to this job
         pbs_script_list += list_of_job_specific_code
 
@@ -563,3 +570,4 @@ class BaseSlurm(BaseCluster):
         """
         
         return int(re.search(r'\d+', stdout).group())
+
