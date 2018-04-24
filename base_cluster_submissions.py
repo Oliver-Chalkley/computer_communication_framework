@@ -1,11 +1,14 @@
 from abc import ABCMeta, abstractmethod
+import time
+import os
+
 class BaseJobSubmission(metaclass=ABCMeta):
     """
     This is an abstract class that all job submission class should inherit from and acts as a template so that all higher level programs can take advantage of this structure and know that future clusters/submission queues will still work.
 
     This class assumes that the cluster connection takes the form of the base_connection class.
     """
-    def __init__(self, submission_name, cluster_connection, simulation_output_path, errorfile_path, outfile_path, runfiles_path, repeitions_of_unique_task, master_dir, temp_storage_path):
+    def __init__(self, submission_name, cluster_connection, simulation_output_path, errorfile_path, outfile_path, runfiles_path, number_of_unique_tasks, repeitions_of_unique_task, master_dir, temp_storage_path):
         """
         The general idea of the structure is that all job submissions will require atleast a computer cluster, a job submission script (and all the details needed to make that script) and a command to submit the job to the cluster queuing system. This is meant to be as abstract/general as possible so things that are specific to a specific cluster should be included in a child class.
 
@@ -23,6 +26,9 @@ class BaseJobSubmission(metaclass=ABCMeta):
         
         self.submission_name = submission_name
         self.submission_file_name = self.submission_name + '_sub_file.sh'
+        self.number_of_unique_tasks = number_of_unique_tasks
+        self.repetitions_of_unique_task = repeitions_of_unique_task
+        self.master_dir = master_dir
         self.temp_storage_path = temp_storage_path
         self.unique_job_name = self.createUniqueJobName(self.submission_name + '_')
         os.makedirs(self.temp_storage_path + '/' + self.unique_job_name)
@@ -32,9 +38,6 @@ class BaseJobSubmission(metaclass=ABCMeta):
         self.errorfile_path = errorfile_path
         self.outfile_path = outfile_path
         self.runfiles_path = runfiles_path
-        self.submission_script_tmp_storage = self.temp_storage_path + '/' + self.submission_file_name
-        self.list_of_directories_to_make_on_cluster = self.createListOfClusterDirectoriesNeeded()
-        self.file_source_to_file_dest_dict = self.createDictOfFileSourceToFileDestinations()
         self.cluster_job_number = None
         self.time_of_submission = None
 
