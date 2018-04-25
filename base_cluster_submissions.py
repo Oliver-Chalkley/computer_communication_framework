@@ -1,6 +1,8 @@
 from abc import ABCMeta, abstractmethod
 import time
 import os
+import datetime
+import subprocess
 
 class BaseJobSubmission(metaclass=ABCMeta):
     """
@@ -25,7 +27,7 @@ class BaseJobSubmission(metaclass=ABCMeta):
         """
         
         self.submission_name = submission_name
-        self.submission_file_name = self.submission_name + '_sub_file.sh'
+        self.submission_file_name = None
         self.number_of_unique_tasks = number_of_unique_tasks
         self.repetitions_of_unique_task = repeitions_of_unique_task
         self.master_dir = master_dir
