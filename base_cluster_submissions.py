@@ -10,7 +10,7 @@ class BaseJobSubmission(metaclass=ABCMeta):
 
     This class assumes that the cluster connection takes the form of the base_connection class.
     """
-    def __init__(self, submission_name, cluster_connection, simulation_output_path, errorfile_path, outfile_path, runfiles_path, number_of_unique_tasks, repeitions_of_unique_task, master_dir, temp_storage_path):
+    def __init__(self, submission_name, cluster_connection, simulation_output_path, errorfile_path, outfile_path, runfiles_path, number_of_unique_tasks, repeitions_of_unique_task, master_dir, temp_storage_path, createAllFilesFunctionName, createDataDictForSpecialistFunctionsFunctionName, createDictOfFileSourceToFileDestinationsFunctionName, createSubmissionScriptFunctionName):
         """
         The general idea of the structure is that all job submissions will require atleast a computer cluster, a job submission script (and all the details needed to make that script) and a command to submit the job to the cluster queuing system. This is meant to be as abstract/general as possible so things that are specific to a specific cluster should be included in a child class.
 
@@ -36,13 +36,16 @@ class BaseJobSubmission(metaclass=ABCMeta):
         os.makedirs(self.temp_storage_path + '/' + self.unique_job_name)
         self.temp_storage_path = self.temp_storage_path + '/' + self.unique_job_name
         self.cluster_connection = cluster_connection
-        self.simulation_output_path = simulation_output_path
-        self.errorfile_path = errorfile_path
-        self.outfile_path = outfile_path
-        self.runfiles_path = runfiles_path
+        self.simulation_output_path = simulation_output_path + '/' + self.submission_name
+        self.errorfile_path = errorfile_path + '/' + self.submission_name
+        self.outfile_path = outfile_path + '/' + self.submission_name
+        self.runfiles_path = runfiles_path + '/' + self.submission_name
         self.cluster_job_number = None
         self.time_of_submission = None
-
+        self.createAllFilesFunctionName = createAllFilesFunctionName # done
+        self.createDataDictForSpecialistFunctionsFunctionName = createDataDictForSpecialistFunctionsFunctionName # done
+        self.createDictOfFileSourceToFileDestinationsFunctionName = createDictOfFileSourceToFileDestinationsFunctionName # done
+        self.createSubmissionScriptFunctionName = createSubmissionScriptFunctionName # done
 
     # ABSTRACT METHODS
     ## createAllFiles function creates all the files needed by the submission. This will vary depending on type of job and so is left as an abstract method.
@@ -98,8 +101,10 @@ class BaseJobSubmission(metaclass=ABCMeta):
             submit_job_ouput_dict (dict): The connection output dict returned once the submission was successfully executed.
         """
 
+        print('In submitJobToCluster!')
         # Create the job submission command
         submit_command = self.cluster_connection.submit_command + ' ' + self.runfiles_path + '/' + self.submission_file_name
+        print('submit_command = ', submit_command)
         # Submit the job to the cluster queue
         submit_job_ouput_dict = self.cluster_connection.checkSuccess(self.cluster_connection.sendCommand, [submit_command])
         # Record the time that the connection returned it's output dict
@@ -135,13 +140,32 @@ class BaseJobSubmission(metaclass=ABCMeta):
 
         return prefix + unique_name_end
 
+    # The following functions are passed a function to execute so to give full adaptability for commonlly used functions. For example processing simulation data after simulations might be a common need but there are many ways in which it might be done. Also note that if you don't want to process the data you can pass the passFunction that can be seen below. This can be used anytime one of these functions doesn't need to do anything.
+    def passFunction(self):
+        pass
+
+    def createAllFiles(self):
+        return getattr(self, self.createAllFilesFunctionName)()
+
+    def createDataDictForAllBespokeFunctions(self):
+        return getattr(self, self.createDataDictForSpecialistFunctionsFunctionName)()
+
+    def createDictOfFileSourceToFileDestinations(self):
+        """
+        Essentially this just creates a dictionary where the keys are all local files that need to be transfered to the cluster and the values are the correspnding location that the file needs to be transfered to.
+        """
+
+        output_dict = getattr(self, self.createDictOfFileSourceToFileDestinationsFunctionName)()
+
+        return output_dict
+
 class BaseManageSubmission(metaclass=ABCMeta):
     """
     This is an abstract class that all manage submission classes should inherit from so that it maintains a structure that higher level programs can reply on.
 
     The class initialises with a submission instance which will be a class that inherits from the BaseJobSubmission class and prepares the job for submission, submits the job to the cluster and then executes the abstract method 'monitorSubmission' to monitor the submission so that upper level programs can do things like waiting until a job is fnished or automatically do data processsing or updating databases with resultss etc.
     """
-    def __init__(self, submission_instance):
+    def __init__(self, submission_instance, convertDataFunctionName, updateCentralDbFunctionName, test_mode = False):
         """
         This function takes a submission instance that is a class that inherits from the BaseJobSubmission class and prepares the job for submission, submits the job to the cluster and then monitors the jobs progress.
 
@@ -149,16 +173,30 @@ class BaseManageSubmission(metaclass=ABCMeta):
             submission_instance (JobSubmission): The JobSubmission object is an object that inherits from the BaseJobSubmission class. 
         """
         self.submission = submission_instance
-        outs =  self.submission.prepareForSubmission()
-        list_of_return_codes = [output['return_code'] for output in outs]
-        if sum(list_of_return_codes) > 0:
-            raise ValueError('There has been a problem preparing some jobs for submission. The return codes from JobSubmission.prepareForSubmission() are: ', list_of_return_codes, '. The submission file name is ', self.submission.submission_file_name, ' and the temp_storage_path was ', self.submission.temp_storage_path)
+        self.convertDataFunctionName = convertDataFunctionName 
+        self.updateCentralDbFunctionName = updateCentralDbFunctionName
+        if test_mode == True:
+                print("WARNING: This is in TEST mode so no files will be transfered and no job will be submitted.")
+                self.submission.time_of_submission = {}
+                self.submission.time_of_submission['day'] = 8
+                self.submission.time_of_submission['month'] = 1
+                self.submission.time_of_submission['year'] = 2018
+        else:
+            outs =  self.submission.prepareForSubmission()
+            list_of_return_codes = [output['return_code'] for output in outs]
+            if sum(list_of_return_codes) > 0:
+                raise ValueError('There has been a problem preparing some jobs for submission. The return codes from JobSubmission.prepareForSubmission() are: ', list_of_return_codes, '. The submission file name is ', self.submission.submission_file_name, ' and the temp_storage_path was ', self.submission.temp_storage_path)
 
-        submission_out_dict = self.submission.submitJobToCluster()
-        if submission_out_dict['return_code'] > 0:
-            raise ValueError('There has been a problem submitting a job. The return code from JobSubmission.submitJobToCluster() is: ', submission_out_dict['return_code'], ". The submission file name is ", self.submission.submission_file_name, " and the temp_storage_path was ", self.submission.temp_storage_path)
+            submission_out_dict = self.submission.submitJobToCluster()
+            if submission_out_dict['return_code'] > 0:
+                raise ValueError('There has been a problem submitting a job. The return code from JobSubmission.submitJobToCluster() is: ', submission_out_dict['return_code'], ". The submission file name is ", self.submission.submission_file_name, " and the temp_storage_path was ", self.submission.temp_storage_path)
 
-        self.monitorSubmission(self.submission)
+        # there is no output given here because if any return codes come back none xero it raises an error and no other output is needed. If any output is needed for debugging it is suggested that you do that inside the self.monitor submission function if possible.
+#        if test_mode == True:
+#                pass
+#        else:
+#                print("Starting monitor submission function!")
+#                self.monitorSubmission(self.submission)
 
         return 
 
@@ -167,3 +205,14 @@ class BaseManageSubmission(metaclass=ABCMeta):
     # This method is to monitor the progress of a job and perform other job related to the job like data processing and updating of databases etc
     def monitorSubmission(self):
         pass
+
+    # The following functions are passed a function to execute so to give full adaptability for commonlly used functions. For example processing simulation data after simulations might be a common need but there are many ways in which it might be done. Also note that if you don't want to process the data you can pass the passFunction that can be seen below. This can be used anytime one of these functions doesn't need to do anything.
+    def passFunction(self):
+        pass
+
+    def postSimulationDataProcessing(self, tuple_of_params):
+        return getattr(self, self.convertDataFunctionName)(tuple_of_params)
+
+    def updateCentralDataBase(self):
+        return getattr(self, self.updateCentralDbFunctionName)()
+

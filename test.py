@@ -203,7 +203,7 @@ class RemoteBaseConnectionTest(unittest.TestCase):
         sub_template_dict['initial_message_in_code'] = 'Initial code test.'
         sub_template_dict['array_nos'] = '1-200'
 
-        pbs_template_as_a_list = base_connection.BasePbs.createPbsSubmissionScriptTemplate(self.faux_connection, sub_template_dict['pbs_job_name'], sub_template_dict['no_of_nodes'], sub_template_dict['no_of_cores'], sub_template_dict['array_nos'], sub_template_dict['walltime'], sub_template_dict['queue_name'], sub_template_dict['job_number'], sub_template_dict['outfile_name_and_path'], sub_template_dict['errorfile_name_and_path'], sub_template_dict['initial_message_in_code'])
+        pbs_template_as_a_list = base_connection.BasePbs.createSubmissionScriptTemplate(self.faux_connection, sub_template_dict['pbs_job_name'], sub_template_dict['no_of_nodes'], sub_template_dict['no_of_cores'], sub_template_dict['array_nos'], sub_template_dict['walltime'], sub_template_dict['queue_name'], sub_template_dict['job_number'], sub_template_dict['outfile_name_and_path'], sub_template_dict['errorfile_name_and_path'], sub_template_dict['initial_message_in_code'])
 
         string_test = [0 if type(line) is str else 1 for line in pbs_template_as_a_list]
         

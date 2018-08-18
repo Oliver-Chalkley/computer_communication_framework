@@ -192,6 +192,7 @@ class Connection(metaclass=ABCMeta):
 
             if connection_success !=0:
                 print('Connection failed. Waiting ' + str(wait) + ' seconds before attempting to reconnect.')
+                print('output = ', output)
                 time.sleep(wait)
 
         # depending on the result either output the data or stop the simulation
@@ -232,7 +233,7 @@ class BaseCluster(Connection):
     """
     The Connection class has all the atomistic atrributes that are general to all computers. If one wishes to manage computer clusters then there are additional atomistic attributes. Computer clusters normally have queuing systems and so one needs to be able to sumit and monitor the queues.
     """
-    def __init__(self, remote_user_name, ssh_config_alias, forename_of_user, surname_of_user, user_email, base_output_path, base_runfiles_path, remote_computer_info, submit_command, affiliation = None):
+    def __init__(self, remote_user_name, ssh_config_alias, forename_of_user, surname_of_user, user_email, base_output_path, base_runfiles_path, remote_computer_info, submit_command, max_array_size, affiliation = None):
         """
         This is called when the BaseCLuster class is initialised (remember that this can't be initialised directly because it inherits from base_connection.Connection but is missing some of the abstract classes described in base_connection.Connection (also it adds new abstract methods)).
 
@@ -261,6 +262,7 @@ class BaseCluster(Connection):
         self.base_output_path = base_output_path
         self.base_runfiles_path = base_runfiles_path
         self.submit_command = submit_command
+        self.max_array_size = max_array_size
 
     # ABSTRACT METHODS
 
@@ -310,7 +312,7 @@ class BasePbs(BaseCluster):
          - checkDiskUsage
     """
 
-    def __init__(self, remote_user_name, ssh_config_alias, forename_of_user, surname_of_user, user_email, base_output_path, base_runfiles_path, remote_computer_info, affiliation = None):
+    def __init__(self, remote_user_name, ssh_config_alias, forename_of_user, surname_of_user, user_email, base_output_path, base_runfiles_path, remote_computer_info, max_array_size, affiliation = None):
         """
         This is called when the BasePbs class is initialised (remember that this can't be initialised directly because it inherits from base_connection.Connection but is missing some of the abstract classes described in base_connection.Connection).
 
@@ -335,7 +337,7 @@ class BasePbs(BaseCluster):
             
         """
         
-        BaseCluster.__init__(self, remote_user_name, ssh_config_alias, forename_of_user, surname_of_user, user_email, base_output_path, base_runfiles_path, remote_computer_info, 'qsub', affiliation)
+        BaseCluster.__init__(self, remote_user_name, ssh_config_alias, forename_of_user, surname_of_user, user_email, base_output_path, base_runfiles_path, remote_computer_info, 'qsub', max_array_size, affiliation)
 
     # INSTANCE METHODS
     def checkQueue(self, job_number):
@@ -391,7 +393,7 @@ class BasePbs(BaseCluster):
             list_of_pbs_commands += ["# Affiliation: " + self.affiliation]
             
         # add the next part of the template to the list
-        list_of_pbs_commands += ["# Last Updated: " + str(datetime.datetime.now()) + "\n", "## Job name", "#PBS -N " + pbs_job_name + "\n", "## Resource request", "#PBS -l nodes=" + str(no_of_nodes) + ":ppn=" + str(no_of_cores) + ",walltime=" + str(walltime), "#PBS -q " + queue_name + "\n", "## Job array request", "#PBS -t " + str(job_array_numbers) + "\n", "## designate output and error files", "#PBS -o " + outfile_name_and_path, "#PBS -e " + errorfile_name_and_path + "\n", "# print some details about the job", 'echo "The Array ID is: ${PBS_ARRAYID}"', 'echo Running on host `hostname`', 'echo Time is `date`', 'echo Directory is `pwd`', 'echo PBS job ID is ${PBS_JOBID}', 'echo This job runs on the following nodes:', 'echo `cat $PBS_NODEFILE | uniq`' + "\n"]
+        list_of_pbs_commands += ["# Last Updated: " + str(datetime.datetime.now()) + "\n", "## Job name", "#PBS -N " + str(pbs_job_name) + "\n", "## Resource request", "#PBS -l nodes=" + str(no_of_nodes) + ":ppn=" + str(no_of_cores) + ",walltime=" + str(walltime), "#PBS -q " + str(queue_name) + "\n", "## Job array request", "#PBS -t " + str(job_array_numbers) + "\n", "## designate output and error files", "#PBS -o " + str(outfile_name_and_path), "#PBS -e " + str(errorfile_name_and_path) + "\n", "# print some details about the job", 'echo "The Array ID is: ${PBS_ARRAYID}"', 'echo Running on host `hostname`', 'echo Time is `date`', 'echo Directory is `pwd`', 'echo PBS job ID is ${PBS_JOBID}', 'echo This job runs on the following nodes:', 'echo `cat $PBS_NODEFILE | uniq`' + "\n"]
 
         return list_of_pbs_commands
 
@@ -444,7 +446,7 @@ class BaseSlurm(BaseCluster):
          - checkDiskUsage
     """
 
-    def __init__(self, remote_user_name, ssh_config_alias, forename_of_user, surname_of_user, user_email, base_output_path, base_runfiles_path, remote_computer_info, affiliation = None):
+    def __init__(self, remote_user_name, ssh_config_alias, forename_of_user, surname_of_user, user_email, base_output_path, base_runfiles_path, remote_computer_info, max_array_size, affiliation = None, slurm_account_name = None):
         """
         This is called when the BasePbs class is initialised (remember that this can't be initialised directly because it inherits from base_connection.Connection but is missing some of the abstract classes described in base_connection.Connection).
 
@@ -469,7 +471,8 @@ class BaseSlurm(BaseCluster):
             
         """
         
-        BaseCluster.__init__(self, remote_user_name, ssh_config_alias, forename_of_user, surname_of_user, user_email, base_output_path, base_runfiles_path, remote_computer_info, 'sbatch', affiliation)
+        BaseCluster.__init__(self, remote_user_name, ssh_config_alias, forename_of_user, surname_of_user, user_email, base_output_path, base_runfiles_path, remote_computer_info, 'sbatch', max_array_size, affiliation)
+        self.slurm_account_name = slurm_account_name
 
     # INSTANCE METHODS
     def checkQueue(self, job_number):
@@ -528,7 +531,7 @@ class BaseSlurm(BaseCluster):
             list_of_slurm_commands += ["## Declare what account the simulations are registered to", "#SBATCH -A " + slurm_account_name + "\n"]
 
         # add the next part of the template to the list
-        list_of_slurm_commands += ["# Last Updated: " + str(datetime.datetime.now()) + "\n", "## Job name", "#SBATCH --job-name=" + job_name + "\n", "## Resource request", "#SBATCH --ntasks=" + str(no_of_cores) + " # No. of cores", "#SBATCH --time=" + str(walltime) + " # walltime", "#SBATCH -p " + queue_name + " # queue/partition\n", "## Job array request", "#SBATCH --array=" + job_array_numbers + "\n", "## designate output and error files", "#SBATCH --output=" + outfile_name_and_path, "#SBATCH --error=" + errorfile_name_and_path + "\n", "# print some details about the job", 'echo "The Array task ID is: ${SLURM_ARRAY_TASK_ID}"', 'echo "The Array job ID is: ${SLURM_ARRAY_JOB_ID}"', 'echo Running on host `hostname`', 'echo Time is `date`', 'echo Directory is `pwd`' + "\n"]
+        list_of_slurm_commands += ["# Last Updated: " + str(datetime.datetime.now()) + "\n", "## Job name", "#SBATCH --job-name=" + job_name + "\n", "## Resource request", "#SBATCH --ntasks=1", "#SBATCH --cpus-per-task=" + str(no_of_cores) + " # No. of cores", "#SBATCH --time=" + str(walltime) + " # walltime", "#SBATCH -p " + queue_name + " # queue/partition\n", "## Job array request", "#SBATCH --array=" + job_array_numbers + "\n", "## designate output and error files", "#SBATCH --output=" + outfile_name_and_path + "_%A_%a.out", "#SBATCH --error=" + errorfile_name_and_path  + "_%A_%a.out" + "\n", "# print some details about the job", 'echo "The Array task ID is: ${SLURM_ARRAY_TASK_ID}"', 'echo "The Array job ID is: ${SLURM_ARRAY_JOB_ID}"', 'echo Running on host `hostname`', 'echo Time is `date`', 'echo Directory is `pwd`' + "\n"]
 
         return list_of_slurm_commands
 
