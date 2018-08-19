@@ -56,15 +56,12 @@ class MGA(metaclass=ABCMeta):
         # get the new children
         # The child name (i.e. key) will be the name used to describe the individual child. The value must contaiin all the arguements neccessary to create a job on the cluster to simulate (or whatever else it might be) the child.
         child_name_to_genome_dict = self.getNewGenerationFunction(self.getNewGenerationFuncName, self.newGen_params_dict)
-        print('child_name_to_genome_dict = ', child_name_to_genome_dict)
         
         # spread the children across clusters
         child_name_to_genome_dict_per_cluster = self.spreadChildrenAcrossClusters(child_name_to_genome_dict)
-        print('child_name_to_genome_dict_per_cluster = ', child_name_to_genome_dict_per_cluster)
 
         # spread children-by-cluster across jobs
         child_name_to_genome_dict_per_cluster = self.spreadChildrenAcrossJobs(child_name_to_genome_dict_per_cluster)
-        print('child_name_to_genome_dict_per_cluster = ', child_name_to_genome_dict_per_cluster)
 
         # submit generation to the cluster
         dict_of_job_submission_insts = {}
@@ -80,7 +77,6 @@ class MGA(metaclass=ABCMeta):
                 createJobSubmisions_params_dict = runSims_params_dict['createJobSubmisions_params_dict'].copy()
                 createJobSubmisions_params_dict['cluster_conn'] = self.cluster_instances_dict[cluster_connection]
                 createJobSubmisions_params_dict['single_child_name_to_genome_dict'] = single_child_name_to_genome_dict.copy()
-                print('single_child_name_to_genome_dict = ', single_child_name_to_genome_dict)
                 dict_of_job_submission_insts[cluster_connection + '_' + str(inner_loop_counter)] = self.createJobSubmissionInstance(runSims_params_dict['createJobSubmissionFuncName'], createJobSubmisions_params_dict)
                 #, self.cluster_instances_dict[cluster_connection], single_child_name_to_genome_dict)
                 inner_loop_counter += 1
@@ -279,15 +275,12 @@ class GeneticAlgorithmBase(MGA):
 #        tmp_child.sort()
 #        tmp_child = tuple([self.gene_id_to_code_dict[gene_id] for gene_id in tmp_child])
 #
-        # update children
-        list_of_children[child_idx] = tmp_child.copy()
-        # create ko set names
-        list_of_child_names[child_idx] = 'child' + str(child_idx + 1)
+            # update children
+            list_of_children[child_idx] = tmp_child.copy()
+            # create ko set names
+            list_of_child_names[child_idx] = 'child' + str(child_idx + 1)
 
-        print('list_of_child_names = ', list_of_child_names)
-        print('list_of_children = ', list_of_children)
         child_name_to_genome_dict = {list_of_child_names[idx]: list_of_children[idx] for idx in range(len(list_of_children))}
-        print('child_name_to_genome_dict = ', child_name_to_genome_dict)
 
         return child_name_to_genome_dict
 
@@ -296,7 +289,6 @@ class GeneticAlgorithmBase(MGA):
     def standardGetNewGeneration(self, newGen_params_dict):
         """
         """
-        print('self.fittest_individuals = ', self.fittest_individuals)
         # create a set of keys that MUST be present in newGen_params_dict
         neccessary_keys = set(('generationZeroFuncName', 'genZero_params_dict', 'noSurvivorsFuncName', 'noSurvivors_params_dict', 'minPopulationFuncName', 'minPopulation_params_dict', 'hasNoLengthFuncName', 'noLength_params_dict', 'mate_the_fittest_dict', 'min_population_to_start_mating'))
         # check that all neccessary keys are present in the dict
@@ -338,7 +330,6 @@ class GeneticAlgorithmBase(MGA):
             else:
                 print("Normal mating!")
                 child_name_to_genome_dict = self.mateTheFittest(newGen_params_dict['mate_the_fittest_dict'])
-                print('child_name_to_genome_dict = ', child_name_to_genome_dict)
         elif has_length == False:
             print("No length!")
             child_name_to_genome_dict = getattr(self, newGen_params_dict['hasNoLengthFuncName'])(newGen_params_dict['noLength_params_dict'])
