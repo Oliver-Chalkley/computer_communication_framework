@@ -175,7 +175,8 @@ class Connection(metaclass=ABCMeta):
 
         # a list of the wait times (in seconds) between each loop should the connection keep failing
         # accumulative time:     15s 30s 45s  1m   6m  16m  30m   1hr   2hr   4hr    8hr   16hr   1day   2day   3day   4day   5day  6 day  7day
-        wait_times = (3, 3, 3, 3, 3, 15, 15, 15, 300, 600, 840, 1800, 3600, 7200, 14400, 28800, 28800) #, 86400, 86400, 86400, 86400, 86400, 86400)
+        #wait_times = (3, 3, 3, 3, 3, 15, 15, 15, 300, 600, 840, 1800, 3600, 7200, 14400, 28800, 28800) #, 86400, 86400, 86400, 86400, 86400, 86400)
+        wait_times = (3, 3, 3, 3, 3, 15, 15, 15, 300, 600, 840, 1800, 3600, 7200) #, 14400, 28800, 28800) #, 86400, 86400, 86400, 86400, 86400, 86400)
 
         # set flag to no successful connection attempt (successful exit code = 0)
         connection_success = 13
@@ -531,7 +532,7 @@ class BaseSlurm(BaseCluster):
             list_of_slurm_commands += ["## Declare what account the simulations are registered to", "#SBATCH -A " + slurm_account_name + "\n"]
 
         # add the next part of the template to the list
-        list_of_slurm_commands += ["# Last Updated: " + str(datetime.datetime.now()) + "\n", "## Job name", "#SBATCH --job-name=" + job_name + "\n", "## Resource request", "#SBATCH --ntasks=1", "#SBATCH --cpus-per-task=" + str(no_of_cores) + " # No. of cores", "#SBATCH --time=" + str(walltime) + " # walltime", "#SBATCH -p " + queue_name + " # queue/partition\n", "## Job array request", "#SBATCH --array=" + job_array_numbers + "\n", "## designate output and error files", "#SBATCH --output=" + outfile_name_and_path + "_%A_%a.out", "#SBATCH --error=" + errorfile_name_and_path  + "_%A_%a.out" + "\n", "# print some details about the job", 'echo "The Array task ID is: ${SLURM_ARRAY_TASK_ID}"', 'echo "The Array job ID is: ${SLURM_ARRAY_JOB_ID}"', 'echo Running on host `hostname`', 'echo Time is `date`', 'echo Directory is `pwd`' + "\n"]
+        list_of_slurm_commands += ["# Last Updated: " + str(datetime.datetime.now()) + "\n", "## Job name", "#SBATCH --job-name=" + job_name + "\n", "## Resource request", "#SBATCH --ntasks=1", "#SBATCH --cpus-per-task=" + str(no_of_cores) + " # No. of cores", "#SBATCH --time=" + str(walltime) + " # walltime", "#SBATCH -p " + queue_name + " # queue/partition\n", "## Job array request", "#SBATCH --array=" + job_array_numbers + "\n", "## designate output and error files", "#SBATCH --output=" + outfile_name_and_path + "_%A_%a.out", "#SBATCH --error=" + errorfile_name_and_path  + "_%A_%a.err" + "\n", "# print some details about the job", 'echo "The Array task ID is: ${SLURM_ARRAY_TASK_ID}"', 'echo "The Array job ID is: ${SLURM_ARRAY_JOB_ID}"', 'echo Running on host `hostname`', 'echo Time is `date`', 'echo Directory is `pwd`' + "\n"]
 
         return list_of_slurm_commands
 

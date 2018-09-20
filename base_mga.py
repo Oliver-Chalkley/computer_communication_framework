@@ -10,7 +10,7 @@ class MGA(metaclass=ABCMeta):
     
     This class will assume that all connections are child classes of the base_connection.Connection class and all job submissions and job submission management classes are children of the relavent base_cluster_submissions class.
     """
-    def __init__(self, dict_of_cluster_instances, MGA_name, relative2clusterBasePath_simulation_output_path, repetitions_of_a_unique_simulation, checkStopFuncName, checkStop_params_dict, getNewGenerationFuncName, newGen_params_dict, runSimulationsFuncName, runSims_params_dict, temp_storage_path):
+    def __init__(self, dict_of_cluster_instances, MGA_name, MGA_description, relative2clusterBasePath_simulation_output_path, repetitions_of_a_unique_simulation, submissionManagerFuncName, submissionManager_params_dict, checkStopFuncName, checkStop_params_dict, getNewGenerationFuncName, newGen_params_dict, runSimulationsFuncName, runSims_params_dict, temp_storage_path):
         """
         This creates a basis for a multi-generation algorithm class.
 
@@ -23,8 +23,11 @@ class MGA(metaclass=ABCMeta):
         self.cluster_instances_dict = dict_of_cluster_instances
         self.generation_counter = None
         self.MGA_name = MGA_name
+        self.MGA_description = MGA_description
         self.relative2clusterBasePath_simulation_output_path = relative2clusterBasePath_simulation_output_path
         self.reps_of_unique_sim = repetitions_of_a_unique_simulation
+        self.submissionManagerFuncName = submissionManagerFuncName
+        self.submissionManager_params_dict = submissionManager_params_dict
         self.checkStopFuncName = checkStopFuncName
         self.checkStop_params_dict = checkStop_params_dict
         self.getNewGenerationFuncName = getNewGenerationFuncName
@@ -34,6 +37,9 @@ class MGA(metaclass=ABCMeta):
         self.temp_storage_path = temp_storage_path
 
     # instance methods
+    def passFunction(self, *args):
+        pass
+
     def run(self):
         if self.generation_counter == None:
             self.generation_counter = 0
@@ -82,14 +88,15 @@ class MGA(metaclass=ABCMeta):
                 inner_loop_counter += 1
 
         # send all jobs to clusters 
-        list_of_dict_of_job_management_instances = self.submitAndMonitorJobsOnCluster(dict_of_job_submission_insts)
+        self.submissionManager_params_dict['dict_of_job_submission_insts'] = dict_of_job_submission_insts
+        dict_of_job_management_insts = self.createSubmissionManagementInstance(self.submissionManagerFuncName, self.submissionManager_params_dict)
 
         # convert list into the dict that the rest of the library is expecting
-        dict_of_job_management_insts = {list(dict_of_job_submission_insts.keys())[idx]: list_of_dict_of_job_management_instances[idx] for idx in range(len(dict_of_job_submission_insts))}
+        #dict_of_job_management_insts = {list_of_job_sub_dict_keys[idx]: list_of_dict_of_job_management_instances[idx] for idx in range(len(dict_of_job_submission_insts))}
 
         # Perform all tasks neccessary after a generation of simulations has finished
         for cluster_connection in dict_of_job_submission_insts.keys():
-            self.postSimulationFunction(dict_of_job_submission_insts[cluster_connection], dict_of_job_management_insts[cluster_connection])
+            self.postSimulationFunction(runSims_params_dict['postSimulationFunctionFuncName'], dict_of_job_submission_insts[cluster_connection], dict_of_job_management_insts[cluster_connection], runSims_params_dict)
 
         return
 
@@ -112,6 +119,14 @@ class MGA(metaclass=ABCMeta):
 
         return output
  
+    def stopAfterNoProgress(self, max_no_of_gens_without_improvement):
+        stop_algorithm = False
+        progress_record = self.progress_record.copy()
+        if progress_record['no_of_generations_of_no_progress'] > max_no_of_gens_without_improvement:
+            stop_algorithm = True
+
+        return stop_algorithm
+
     ### METHODS TO GET THE POPULATION SIZE
 
     def getPopulationSize(self, getPopulationSizeFuncName, popSize_params_dict):
@@ -204,22 +219,19 @@ class MGA(metaclass=ABCMeta):
     def createJobSubmissionInstance(self, createJobSubmissionFuncName, jobSubmission_params_dict):
         return getattr(self, createJobSubmissionFuncName)(jobSubmission_params_dict)
 
+    def createSubmissionManagementInstance(self, createSubmissionManagerFuncName, submissionManager_params_dict):
+        return getattr(self, createSubmissionManagerFuncName)(submissionManager_params_dict)
 
-    # ABSTRACT METHODS
-    @abstractmethod
-    def postSimulationFunction(self, job_submission_info, job_manage_info):
-        pass
-
-    @abstractmethod
-    def submitAndMonitorJobsOnCluster(self, dict_of_job_submission_insts):
-        # The job submission instance is an object that inherits from the base_cluster_submissions.BaseJobSubmission class. This takes a dictionary of job submission instance as an argument and then uses their methods to prepare and submit the jobs. From there this function can monitor the progress of the submission and do any other related work like process data and update databases etc. What needs to be done in this function needs to be defined at a higher level so this is left as an abstract method here.
-        pass
+    def postSimulationFunction(self, postSimulationFunctionFuncName, job_submission_info, job_manage_info, postSimulationFunc_params_dict):
+        return getattr(self, postSimulationFunctionFuncName)(job_submission_info, job_manage_info, postSimulationFunc_params_dict)
 
 class GeneticAlgorithmBase(MGA):
-    def __init__(self, dict_of_cluster_instances, MGA_name, relative2clusterBasePath_simulation_output_path, repetitions_of_a_unique_simulation, checkStopFuncName, checkStop_params_dict, getNewGenerationFuncName, newGen_params_dict, runSimulationsFuncName, runSims_params_dict, max_no_of_fit_individuals, temp_storage_path):
-        MGA.__init__(self, dict_of_cluster_instances, MGA_name, relative2clusterBasePath_simulation_output_path, repetitions_of_a_unique_simulation, checkStopFuncName, checkStop_params_dict, getNewGenerationFuncName, newGen_params_dict, runSimulationsFuncName, runSims_params_dict, temp_storage_path)
+    def __init__(self, dict_of_cluster_instances, MGA_name, MGA_description, relative2clusterBasePath_simulation_output_path, repetitions_of_a_unique_simulation, submissionManagerFuncName, submissionManager_params_dict, checkStopFuncName, checkStop_params_dict, getNewGenerationFuncName, newGen_params_dict, runSimulationsFuncName, runSims_params_dict, max_no_of_fit_individuals, temp_storage_path, updateFittestPopulationFuncName):
+        MGA.__init__(self, dict_of_cluster_instances, MGA_name, MGA_description, relative2clusterBasePath_simulation_output_path, repetitions_of_a_unique_simulation, submissionManagerFuncName, submissionManager_params_dict, checkStopFuncName, checkStop_params_dict, getNewGenerationFuncName, newGen_params_dict, runSimulationsFuncName, runSims_params_dict, temp_storage_path)
         self.fittest_individuals = {}
         self.max_no_of_fit_individuals = max_no_of_fit_individuals
+        self.updateFittestPopulationFuncName = updateFittestPopulationFuncName
+        self.progress_record = {'no_of_generations_of_no_progress': 0, 'best_fitness_score': 0}
 
     def mateTheFittest(self, mateFittest_params_dict):
         # check the right mateFittest_params_dict have been passed
@@ -338,7 +350,29 @@ class GeneticAlgorithmBase(MGA):
 
         return child_name_to_genome_dict
 
-    def updateFittestPopulation(self, submission_instance, submission_management_instance, extractAndScoreContendersFuncName, extractContender_params_dict, max_or_min):
+    def updateFittestPopulation(self, updateFittestPopulationFuncName, submission_instance, submission_management_instance, extractAndScoreContendersFuncName, extractContender_params_dict, max_or_min):
+        output = getattr(self, updateFittestPopulationFuncName)(submission_instance, submission_management_instance, extractAndScoreContendersFuncName, extractContender_params_dict, max_or_min)
+
+        # record progress
+        fittest_individuals = self.fittest_individuals.copy()
+        if max_or_min == 'max':
+            fittest_score = max(fittest_individuals[-1][-1][0])
+            if self.progress_record['best_fitness_score'] < fittest_score:
+                self.progress_record['best_fitness_score'] = fittest_score
+                self.progress_record['no_of_generations_of_no_progress'] = 0
+            else:
+                self.progress_record['no_of_generations_of_no_progress'] += 1
+        if max_or_min == 'min':
+            fittest_score = min(fittest_individuals[-1][-1][0])
+            if self.progress_record['best_fitness_score'] > fittest_score:
+                self.progress_record['best_fitness_score'] = fittest_score
+                self.progress_record['no_of_generations_of_no_progress'] = 0
+            else:
+                self.progress_record['no_of_generations_of_no_progress'] += 1
+
+        return output
+
+    def standardUpdateFittestPopulation(self, submission_instance, submission_management_instance, extractAndScoreContendersFuncName, extractContender_params_dict, max_or_min):
         # validate, score and extract children
         new_individuals = getattr(submission_management_instance, extractAndScoreContendersFuncName)(submission_management_instance.simulation_data_dict.copy(), extractContender_params_dict)
         new_genomes = list(new_individuals.keys())
@@ -479,4 +513,3 @@ class GeneticAlgorithmBase(MGA):
         tuple_of_probabilities = tuple([fittest_scores[idx]/sum(fittest_scores) for idx in range(len(fittest_genomes))])
 
         return tuple_of_probabilities
-

@@ -10,7 +10,7 @@ class BaseJobSubmission(metaclass=ABCMeta):
 
     This class assumes that the cluster connection takes the form of the base_connection class.
     """
-    def __init__(self, submission_name, cluster_connection, simulation_output_path, errorfile_path, outfile_path, runfiles_path, number_of_unique_tasks, repeitions_of_unique_task, master_dir, temp_storage_path, createAllFilesFunctionName, createDataDictForSpecialistFunctionsFunctionName, createDictOfFileSourceToFileDestinationsFunctionName, createSubmissionScriptFunctionName):
+    def __init__(self, experiment_name, experiment_description, submission_name, cluster_connection, simulation_output_path, errorfile_path, outfile_path, runfiles_path, number_of_unique_tasks, repeitions_of_unique_task, master_dir, temp_storage_path, createAllFilesFunctionName, createDataDictForSpecialistFunctionsFunctionName, createDictOfFileSourceToFileDestinationsFunctionName, createSubmissionScriptFunctionName):
         """
         The general idea of the structure is that all job submissions will require atleast a computer cluster, a job submission script (and all the details needed to make that script) and a command to submit the job to the cluster queuing system. This is meant to be as abstract/general as possible so things that are specific to a specific cluster should be included in a child class.
 
@@ -26,6 +26,8 @@ class BaseJobSubmission(metaclass=ABCMeta):
             temp_storage_path (str): The absolute path on the local computer that you want temporary files to be stored on.
         """
         
+        self.experiment_name = experiment_name
+        self.experiment_description = experiment_description
         self.submission_name = submission_name
         self.submission_file_name = None
         self.number_of_unique_tasks = number_of_unique_tasks

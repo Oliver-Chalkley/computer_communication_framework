@@ -4,3 +4,5 @@ __pycache__
 *.pyc
 *.swp
 batch_jobs.py
+*.png
+*.svg
