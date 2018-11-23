@@ -79,7 +79,7 @@ class Connection(metaclass=ABCMeta):
         return
 
     # INSTANCE METHODS
-    def transferFile(self, source, destination, rsync_flags = "-aP", remote = True):
+    def transferFile(self, source, destination, source_loc = 'local', dest_loc = 'remote', rsync_flags = "-aP"):
         """
         Uses rsync with specified flags (unspecified uses "-aP") to send a file to the remote computer. Source and destination only need the actual paths as the SSH connection will be done automatically.
 
@@ -88,22 +88,31 @@ class Connection(metaclass=ABCMeta):
         Args:
             source (str): path and filename of the file to transfer.
             destination (str): path to the destination directory.
+            source_loc (str): indicates whether the source path is on the local or remote computer.
+            dest_loc (str): indicates whether the destination path is on the local or remote computer.
             rsync_flags (str): any flags that you would like when copying. This defaults to -aP (a is archive mode i.e. -rlptgoD (see manual for more information) and P is --progress which produces a progress bar.
-            remote = True (bool): This says indicates whether you want to do a local or remote file transfer. Default is set to remote so will look in the class variables for the connection details.
 
         Returns:
             output_dict (dict): returns the 'return_code' from subprocess.call(rsync_cmd, shell=True).
         """
-        if remote:
-            rsync_cmd = "rsync " + rsync_flags + " " + source + " " + self.ssh_config_alias + ":" + destination
-            output = subprocess.call(rsync_cmd, shell=True)
-            output_dict = {}
-            output_dict['return_code'] = output
+        if source_loc == 'remote':
+            source = self.ssh_config_alias + ":" + source
+        elif source_loc == 'local':
+            pass
         else:
-            rsync_cmd = "rsync " + rsync_flags + " " + source + " " + destination
-            output = subprocess.call(rsync_cmd, shell=True)
-            output_dict = {}
-            output_dict['return_code'] = output
+            raise ValueError('source_loc must either be \'remote\' or \'local\'. source_loc = ', source_loc)
+
+        if dest_loc == 'remote':
+            destination = self.ssh_config_alias + ":" + destination
+        elif dest_loc == 'local':
+            pass
+        else:
+            raise ValueError('dest_loc must either be \'remote\' or \'local\'. dest_loc = ', dest_loc)
+
+        rsync_cmd = "rsync " + rsync_flags + " " + source + " " + destination
+        output = subprocess.call(rsync_cmd, shell=True)
+        output_dict = {}
+        output_dict['return_code'] = output
 
         return output_dict
 
